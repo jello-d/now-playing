@@ -1,0 +1,14 @@
+#!/bin/sh
+# np-ctl - send a transport command to the now-playing daemon's control FIFO.
+# The daemon routes it to the live source (a Chromecast via pychromecast, or the
+# local MPRIS player via playerctl), so play/pause/next/previous behave the same
+# whether casting or playing locally -- unlike a direct playerctl call, which
+# cannot reach a physical Chromecast (its local MPRIS is an empty stub while
+# casting). Commands: playpause | next | previous.
+#
+# The timeout guards a dead daemon: with no reader on the FIFO the write-open
+# would block forever and hang the bar's click handler, so cap it and drop the
+# command instead.
+f="${XDG_RUNTIME_DIR:-/tmp}/now-playing.ctl"
+[ -p "$f" ] || exit 0
+timeout 0.5 sh -c 'printf "%s\n" "$1" > "$2"' _ "$1" "$f" 2>/dev/null || true

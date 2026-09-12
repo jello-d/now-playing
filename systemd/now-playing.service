@@ -1,0 +1,16 @@
+[Unit]
+Description=now-playing: MPRIS + cast-fallback state for a media widget
+After=default.target
+
+[Service]
+# ExecStart is the launcher setup.sh writes: it execs the package venv's python
+# on the daemon (the venv carries pychromecast for the cast fallback). The
+# daemon also shells out to playerctl (a system binary), so keep the system
+# dirs on PATH.
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.local/bin/now-playing
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

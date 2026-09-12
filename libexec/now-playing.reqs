@@ -1,0 +1,7 @@
+# now-playing.reqs - venv for the now-playing daemon's Chromecast FALLBACK.
+# pychromecast pulls zeroconf / casttube / ifaddr / protobuf transitively. Only
+# used when local MPRIS is idle (i.e. while casting); local playback needs none
+# of it. Read-only receiver status gates the media controller so a device is
+# never driven unless a real Cast media receiver is already running.
+# playerctl is a SYSTEM binary (packages/), not a venv dep.
+pychromecast==14.0.10

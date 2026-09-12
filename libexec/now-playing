@@ -1,0 +1,489 @@
+#!/usr/bin/env python3
+"""
+now-playing - "now playing" state for the waybar media/card: local MPRIS with a
+Chromecast FALLBACK. Runs as a systemd --user service.
+
+PRIORITY: local MPRIS (playerctl --follow) wins whenever it has a track. The
+cast fallback is consulted ONLY when local is idle -- while playing locally we
+make ZERO cast connections. Casting empties Chrome's local MPRIS to a stub, so
+the fallback reads the metadata off the cast device instead.
+
+SAFETY (why cast is safe again): we never blindly drive a device. On a candidate
+we read the PASSIVE receiver status first (broadcast, read-only) and engage the
+MEDIA controller -- the part that can launch the Default Media Receiver and
+HIJACK a TV -- only once `app_id` proves a real Cast media receiver is ALREADY
+running (a valid 8-hex Cast Application ID + the media namespace). A device on
+its own native app (app_id 'AndroidNativeApp', e.g. a Google TV on HBO Max) is
+inspected read-only and dropped, never driven. Devices are only probed when
+their mDNS says an app is running (st=1) AND local is idle.
+
+Publishes STATE_FILE:
+  { status, source, device, title, artist, album, art, position, length, at }
+`art` is a local FILE PATH (file:// used in place, http(s) downloaded once to a
+per-url cache file); `position`/`length` are seconds; `at` is the wall clock
+when position was sampled, so the card interpolates a smooth scrubber.
+
+Transport arrives over a control FIFO (np-ctl): routed to the live cast's media
+controller while casting, else to playerctl.
+
+Deps: pychromecast (venv), playerctl (system binary), python3 stdlib.
+Env:
+  NP_PLAYERS  playerctl --player list; default YoutubeMusic,chrome,chromium
+"""
+import json, os, sys, signal, threading, subprocess, time, re, logging
+import hashlib, shutil, urllib.request, urllib.parse
+
+PLAYERS    = os.environ.get("NP_PLAYERS", "YoutubeMusic,chrome,chromium")
+US         = "\x1f"
+RUN        = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
+STATE_FILE = os.path.join(RUN, "now-playing.state")
+CTL_FILE   = os.path.join(RUN, "now-playing.ctl")
+POLL_SECS  = 1.5                     # local position re-sample / re-publish
+CAST_SECS  = 2.0                     # cast reconcile / status-refresh cadence
+REDISC_SECS = 300.0                  # idle mDNS rediscovery (anti-stale)
+MEDIA_NS   = "urn:x-cast:com.google.cast.media"
+
+for n in ("pychromecast", "zeroconf"):
+    logging.getLogger(n).setLevel(logging.ERROR)
+
+_lock      = threading.Lock()
+_laststate = None                    # last written JSON (dedupe writes)
+_local     = None                    # local MPRIS dict or None
+_cast      = None                    # active cast dict or None
+
+_shutdown  = threading.Event()
+_proc      = None                    # playerctl --follow Popen
+
+# cast plumbing (populated by cast_loop)
+_zc        = None                    # zeroconf.Zeroconf
+_browser   = None                    # pychromecast CastBrowser
+_seen      = {}                      # uuid -> mDNS service name (discovered)
+_seen_lock = threading.Lock()
+_cast_conn = None                    # active pychromecast (pos/transport)
+_cast_uuid = None
+
+_art_cache = {}                      # art url -> local path
+_art_lock  = threading.Lock()
+
+IDLE = {"status": "idle", "source": "", "device": "", "title": "", "artist": "",
+        "album": "", "art": "", "position": 0.0, "length": 0.0, "at": 0.0}
+
+
+# ---- cover art ------------------------------------------------------------
+def fetch_art(url):
+    """Local file path for `url`, or "". file:// used in place; http(s) fetched
+    once to a per-url cache file (unique name so it reloads). Never raises."""
+    if not url:
+        return ""
+    if url.startswith("file://"):
+        return urllib.parse.unquote(urllib.parse.urlparse(url).path)
+    with _art_lock:
+        p = _art_cache.get(url)
+    if p and os.path.exists(p):
+        return p
+    try:
+        h = hashlib.sha1(url.encode("utf-8", "replace")).hexdigest()[:16]
+        dst = os.path.join(RUN, "np-art-" + h)
+        if not os.path.exists(dst):
+            tmp = dst + ".tmp"
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "waybar-np"})
+            with urllib.request.urlopen(req, timeout=4) as r, \
+                 open(tmp, "wb") as f:
+                shutil.copyfileobj(r, f)
+            os.replace(tmp, dst)
+        with _art_lock:
+            _art_cache[url] = dst
+        return dst
+    except Exception as e:
+        sys.stderr.write("now-playing: art fetch failed (%s)\n" % e)
+        return ""
+
+
+# ---- state publishing -----------------------------------------------------
+def _fields(s):
+    return {"status": s["status"], "title": s["title"], "artist": s["artist"],
+            "album": s["album"], "art": s.get("art", ""),
+            "position": s.get("position", 0.0), "length": s.get("length", 0.0),
+            "at": s.get("at", 0.0)}
+
+def _merged_locked():
+    """Local wins whenever it has a track; the cast fallback fills the gap."""
+    if _local and _local["title"] and _local["status"] in ("playing", "paused"):
+        return dict(source="local", device="", **_fields(_local))
+    if _cast and _cast["title"] and _cast["status"] in ("playing", "paused"):
+        return dict(source="cast", device=_cast.get("device", ""),
+                    **_fields(_cast))
+    return None
+
+def _write_state(state):
+    global _laststate
+    s = json.dumps(state, ensure_ascii=False)
+    if s == _laststate:
+        return
+    _laststate = s
+    try:
+        tmp = STATE_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            f.write(s + "\n")
+        os.replace(tmp, STATE_FILE)
+    except Exception as e:
+        sys.stderr.write("now-playing: state write failed (%s)\n" % e)
+
+def publish():
+    with _lock:
+        m = _merged_locked()
+    if m is None:
+        _write_state(dict(IDLE))
+        return
+    m["art"] = fetch_art(m.get("art", ""))     # resolve URL -> path
+    _write_state(m)
+
+
+# ---- local position sampling ----------------------------------------------
+def _playerctl_position():
+    try:
+        out = subprocess.run(["playerctl", "--player=" + PLAYERS, "position"],
+                             capture_output=True, text=True, timeout=1)
+        return float((out.stdout or "").strip() or 0)
+    except Exception:
+        return 0.0
+
+def sample_positions():
+    now = time.time()
+    with _lock:
+        have_local = _local is not None and _local.get("title")
+    if have_local:
+        pos = _playerctl_position()
+        with _lock:
+            if _local is not None:
+                _local["position"] = pos
+                _local["at"] = now
+
+def position_loop():
+    while not _shutdown.wait(POLL_SECS):
+        sample_positions()
+        publish()
+
+
+# ---- transport control ----------------------------------------------------
+def _do_command(cmd):
+    # While a cast is the live source, drive its media controller (a direct
+    # playerctl cannot reach it -- local MPRIS is a stub then). Else playerctl.
+    with _lock:
+        cast_live = _cast is not None and _cast.get("title")
+        cast_status = _cast.get("status") if cast_live else None
+    conn = _cast_conn
+    if cast_live and conn is not None:
+        try:
+            mc = conn.media_controller
+            if cmd == "playpause":
+                (mc.pause if cast_status == "playing" else mc.play)()
+            elif cmd == "next":
+                mc.skip()
+            elif cmd == "previous":
+                mc.queue_prev()          # best effort; not all cast apps do it
+        except Exception as e:
+            sys.stderr.write("now-playing: cast %s failed (%s)\n" % (cmd, e))
+        return
+    action = {"playpause": "play-pause", "next": "next",
+              "previous": "previous"}.get(cmd)
+    if action:
+        try:
+            subprocess.run(["playerctl", "--player=" + PLAYERS, action],
+                           check=False)
+        except FileNotFoundError:
+            pass
+
+def ctl_loop():
+    try:
+        if not os.path.exists(CTL_FILE):
+            os.mkfifo(CTL_FILE)
+    except OSError as e:
+        sys.stderr.write("now-playing: ctl fifo init failed (%s)\n" % e)
+        return
+    while not _shutdown.is_set():
+        try:
+            with open(CTL_FILE) as f:
+                for line in f:
+                    cmd = line.strip()
+                    if cmd:
+                        _do_command(cmd)
+        except Exception:
+            if _shutdown.is_set():
+                break
+
+
+# ---- local MPRIS source ---------------------------------------------------
+def mpris_loop():
+    global _local, _proc
+    fmt = US.join(("{{lc(status)}}", "{{artist}}", "{{title}}", "{{album}}",
+                   "{{mpris:artUrl}}", "{{mpris:length}}"))
+    cmd = ["playerctl", "--player=" + PLAYERS, "--follow", "metadata",
+           "--format", fmt]
+    try:
+        _proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                 stderr=subprocess.DEVNULL, text=True)
+    except FileNotFoundError:
+        sys.stderr.write("now-playing: playerctl not found; local source off\n")
+        return
+    for line in _proc.stdout:
+        parts = (line.rstrip("\n").split(US) + [""] * 6)[:6]
+        status, artist, title, album, art, length_us = parts
+        length = 0.0
+        try:
+            length = float(length_us) / 1e6
+        except ValueError:
+            pass
+        with _lock:
+            if not title or status == "stopped":
+                _local = None
+            else:
+                prev = _local or {}
+                same = prev.get("title") == title
+                _local = {"status": status, "title": title, "artist": artist,
+                          "album": album, "art": art, "length": length,
+                          "position": (prev.get("position", 0.0)
+                                        if same else 0.0),
+                          "at": prev.get("at", 0.0) if same else 0.0}
+        publish()
+
+
+# ---- Chromecast FALLBACK --------------------------------------------------
+def _to_status(ms):
+    st = (ms.player_state or "").upper()
+    return {"PLAYING": "playing", "BUFFERING": "playing",
+            "PAUSED": "paused"}.get(st, "stopped")
+
+def _read_media(ms, name):
+    art = ""
+    try:
+        if ms.images:
+            art = ms.images[0].url or ""
+    except Exception:
+        pass
+    return {"device": name, "status": _to_status(ms),
+            "title": ms.title or "", "artist": ms.artist or "",
+            "album": ms.album_name or "", "art": art,
+            "position": ms.adjusted_current_time or 0.0,
+            "length": ms.duration or 0.0, "at": time.time()}
+
+def _is_cast_media(cast_status):
+    """True iff the RECEIVER status shows a real Cast media receiver already
+    running -- a valid 8-hex Cast Application ID with the media namespace. A
+    native app reports app_id 'AndroidNativeApp' (fails the hex test), so we
+    never engage the media controller on it. Read from the passive receiver
+    broadcast; no media controller touched."""
+    aid = cast_status.app_id or ""
+    return (bool(re.fullmatch(r"[0-9A-Fa-f]{8}", aid))
+            and MEDIA_NS in (cast_status.namespaces or []))
+
+def cast_main():
+    global _zc, _browser, _cast, _cast_conn, _cast_uuid
+    try:
+        import zeroconf, pychromecast
+        from pychromecast import discovery
+        from pychromecast.controllers.media import MediaStatusListener
+    except Exception as e:                       # degrade to MPRIS-only
+        sys.stderr.write("now-playing: cast fallback disabled (%s)\n" % e)
+        return
+
+    notcast = {}                     # uuid -> rs already probed as NOT cast
+    def add(uuid, service):
+        with _seen_lock:
+            _seen[uuid] = service
+    def remove(uuid, service, info):
+        with _seen_lock:
+            _seen.pop(uuid, None)
+        notcast.pop(uuid, None)
+
+    def start_browser():
+        global _zc, _browser
+        _zc = zeroconf.Zeroconf()
+        _browser = discovery.CastBrowser(
+            discovery.SimpleCastListener(add_callback=add, update_callback=add,
+                                         remove_callback=remove), _zc)
+        _browser.start_discovery()
+
+    def stop_browser():
+        # Tear discovery down so it can be recreated with a fresh multicast
+        # socket. Only the discovery browser is affected -- a live cast keeps
+        # its own device connection -- and we only call this while idle.
+        try:
+            discovery.stop_discovery(_browser)
+        except Exception:
+            pass
+        try:
+            _zc.close()
+        except Exception:
+            pass
+        with _seen_lock:
+            _seen.clear()
+
+    start_browser()
+    disc_at = time.time()
+
+    class Listener(MediaStatusListener):
+        def __init__(self, name):
+            self.name = name
+        def new_media_status(self, status):
+            global _cast
+            st = _to_status(status)
+            if st in ("playing", "paused") and (status.title or status.artist):
+                with _lock:
+                    _cast = _read_media(status, self.name)
+            else:
+                with _lock:
+                    _cast = None
+            publish()
+        def load_media_failed(self, item, code):
+            pass
+
+    def mdns_txt(service):
+        """Device's mDNS TXT (decoded, cache-only -- no network I/O). st='1' =>
+        an app is running; rs => the running app's name (changes per cast)."""
+        try:
+            info = zeroconf.ServiceInfo("_googlecast._tcp.local.", service)
+            if not info.load_from_cache(_zc):
+                return {}
+            return {k.decode("utf-8", "replace"):
+                    (v or b"").decode("utf-8", "replace")
+                    for k, v in info.properties.items()}
+        except Exception:
+            return {}
+
+    def drop():
+        global _cast, _cast_conn, _cast_uuid
+        c, _cast_conn, _cast_uuid = _cast_conn, None, None
+        if c is not None:
+            try:
+                c.disconnect()
+            except Exception:
+                pass
+        with _lock:
+            was = _cast is not None
+            _cast = None
+        if was:
+            publish()
+
+    while not _shutdown.wait(CAST_SECS):
+        with _lock:
+            local_live = (_local is not None and _local.get("title")
+                          and _local["status"] in ("playing", "paused"))
+        # Local wins: never hold a cast connection while playing locally.
+        if local_live:
+            if _cast_conn is not None:
+                drop()
+            continue
+
+        # Have a live cast: refresh (position) and validate it is still casting.
+        if _cast_conn is not None:
+            try:
+                if not _is_cast_media(_cast_conn.status):
+                    drop(); continue
+                _cast_conn.media_controller.update_status()   # -> Listener
+            except Exception:
+                drop()
+            continue
+
+        # Idle with no live cast: periodically rebuild discovery. A long-lived
+        # zeroconf multicast socket can stop receiving a device's TXT updates
+        # (network events, group drop, days of uptime), so a device that starts
+        # casting is silently missed -- its cached st never flips to "1". A
+        # fresh browser refreshes the socket. Safe here: no live cast needs it.
+        if time.time() - disc_at > REDISC_SECS:
+            stop_browser()
+            start_browser()
+            disc_at = time.time()
+
+        # No cast yet + local idle: probe active devices, gate on app_id.
+        with _seen_lock:
+            candidates = list(_seen.items())
+        for uuid, service in candidates:
+            if _shutdown.is_set():
+                break
+            txt = mdns_txt(service)
+            if txt.get("st") != "1":              # only an app-running device
+                continue
+            rs = txt.get("rs", "")
+            if notcast.get(uuid) == rs:           # already probed: skip
+                continue
+            info = _browser.devices.get(uuid)
+            if not info:
+                continue
+            try:
+                cast = pychromecast.get_chromecast_from_cast_info(info, _zc)
+                cast.wait(timeout=10)
+            except Exception:
+                continue
+            # READ-ONLY gate: is a real Cast media receiver already running?
+            if not _is_cast_media(cast.status):
+                notcast[uuid] = rs                # remember (per running app)
+                try:
+                    cast.disconnect()             # native app / idle
+                except Exception:
+                    pass
+                continue
+            # Confirmed: safe to engage the media controller.
+            notcast.pop(uuid, None)
+            _cast_conn = cast
+            _cast_uuid = uuid
+            cast.media_controller.register_status_listener(Listener(
+                info.friendly_name))
+            try:
+                cast.media_controller.update_status()
+            except Exception:
+                pass
+            break
+
+
+# ---- clean shutdown -------------------------------------------------------
+def _cleanup(*_):
+    if _shutdown.is_set():
+        return
+    _shutdown.set()
+    _write_state(dict(IDLE))
+    try:
+        if os.path.exists(CTL_FILE):
+            os.unlink(CTL_FILE)
+    except OSError:
+        pass
+    if _proc and _proc.poll() is None:
+        try:
+            _proc.terminate()
+        except Exception:
+            pass
+    if _cast_conn is not None:
+        try:
+            _cast_conn.disconnect()
+        except Exception:
+            pass
+    if _browser is not None:
+        try:
+            from pychromecast import discovery
+            discovery.stop_discovery(_browser)
+        except Exception:
+            pass
+    if _zc is not None:
+        try:
+            _zc.close()
+        except Exception:
+            pass
+
+def _on_signal(signum, frame):
+    _cleanup()                                   # main thread wakes from wait()
+
+
+# ---- main -----------------------------------------------------------------
+def main():
+    signal.signal(signal.SIGINT, _on_signal)
+    signal.signal(signal.SIGTERM, _on_signal)
+    publish()                                    # initial idle
+    threading.Thread(target=mpris_loop, daemon=True).start()
+    threading.Thread(target=ctl_loop, daemon=True).start()
+    threading.Thread(target=position_loop, daemon=True).start()
+    threading.Thread(target=cast_main, daemon=True).start()
+    _shutdown.wait()                             # until a signal
+
+if __name__ == "__main__":
+    main()
