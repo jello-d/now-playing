@@ -112,9 +112,20 @@ do_check() {
   if [ -e "$_bin/now-playing" ]; then
     [ -x "$VENV/bin/python" ] && ok "daemon venv present" \
       || bad "launcher present but venv missing (setup.sh service)"
+    # enabled = will start next login (headless-safe: reads the unit file).
     systemctl --user is-enabled --quiet now-playing.service 2>/dev/null \
       && ok "now-playing.service enabled" \
       || bad "now-playing.service not enabled (setup.sh service)"
+    # active = actually running NOW. This needs a session bus, which a headless
+    # TTY provision lacks, so only assert it when the bus answers -- otherwise
+    # skip. Without this an ENABLED-but-crash-looping service (e.g. a launcher
+    # pointing at a moved path) reads green forever; is-enabled cannot see it.
+    _st=$(systemctl --user is-active now-playing.service 2>/dev/null || true)
+    case "$_st" in
+      active) ok "now-playing.service active" ;;
+      "")     : ;;   # no session bus (headless) -- runtime state unknowable
+      *)      bad "now-playing.service '$_st', not active (crash-loop?)" ;;
+    esac
   else
     warn "daemon not installed (run setup.sh service for it)"
   fi
