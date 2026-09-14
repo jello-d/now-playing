@@ -17,23 +17,34 @@ its own native app (app_id 'AndroidNativeApp', e.g. a Google TV on HBO Max) is
 inspected read-only and dropped, never driven. Devices are only probed when
 their mDNS says an app is running (st=1) AND local is idle.
 
-Publishes STATE_FILE:
-  { status, source, device, title, artist, album, art, position, length, at }
-`art` is a local FILE PATH (file:// used in place, http(s) downloaded once to a
-per-url cache file); `position`/`length` are seconds; `at` is the wall clock
-when position was sampled, so the card interpolates a smooth scrubber.
+PUBLISHES the shared-memory FRAME (libexec/npframe.py, docs/contract.md): one
+page at $XDG_RUNTIME_DIR/now-playing.frame carrying everything a renderer
+needs, complete every time, coherent by seqlock. THE DAEMON INTERPOLATES
+position between real samples; a consumer never does, and never consults a
+second source of truth.
+
+Also still publishes the legacy JSON STATE_FILE. That projection is
+TRANSITIONAL and retires once every consumer reads the frame; the frame is the
+contract.
 
 Transport arrives over a control FIFO (np-ctl): routed to the live cast's media
-controller while casting, else to playerctl.
+controller while casting, else to playerctl. Output is continuous, lossy and
+multi-consumer (shared memory); input is discrete, rare and must not be dropped
+(a FIFO). The asymmetry is deliberate.
+
+Verbs (the daemon is the default, which is what the --user unit runs):
+  now-playing              run the daemon
+  now-playing status       print the current frame and exit
+  now-playing shm-info     print the segment path, version and geometry
 
 Deps: pychromecast (venv), playerctl (system binary), python3 stdlib.
-Env:
-  NP_PLAYERS  playerctl --player list; default YoutubeMusic,chrome,chromium
 """
 import json, os, sys, signal, threading, subprocess, time, re, logging
 import hashlib, shutil, urllib.request, urllib.parse
 
-PLAYERS    = os.environ.get("NP_PLAYERS", "YoutubeMusic,chrome,chromium")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import npframe                                   # noqa: E402  (sibling module)
+
 US         = "\x1f"
 RUN        = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
 STATE_FILE = os.path.join(RUN, "now-playing.state")
@@ -42,6 +53,62 @@ POLL_SECS  = 1.5                     # local position re-sample / re-publish
 CAST_SECS  = 2.0                     # cast reconcile / status-refresh cadence
 REDISC_SECS = 300.0                  # idle mDNS rediscovery (anti-stale)
 MEDIA_NS   = "urn:x-cast:com.google.cast.media"
+
+# ---- configuration --------------------------------------------------------
+# KEY=VALUE, '#' comments, values read LITERALLY (no quoting, no expansion,
+# nothing executed). An UNKNOWN KEY IS A LOUD ERROR: a silently ignored typo in
+# a tunable would simply never take effect and be found months later. Every key
+# is overridable by NP_<KEY> in the environment for one-off testing.
+CONFIG_KEYS = {"players": str, "publish_hz": float}
+CONFIG_DEFAULTS = {"players": "YoutubeMusic,chrome,chromium",
+                   "publish_hz": 30.0}
+PLAYERS = CONFIG_DEFAULTS["players"]     # set from config before threads start
+
+
+def _die(msg):
+    sys.stderr.write("now-playing: %s\n" % msg)
+    raise SystemExit(2)
+
+
+def config_path():
+    base = (os.environ.get("XDG_CONFIG_HOME")
+            or os.path.join(os.path.expanduser("~"), ".config"))
+    return os.path.join(base, "now-playing", "config")
+
+
+def load_config():
+    cfg = dict(CONFIG_DEFAULTS)
+    path = config_path()
+    try:
+        with open(path) as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        lines = []
+    except OSError as e:
+        _die("cannot read %s (%s)" % (path, e))
+    for n, line in enumerate(lines, 1):
+        s = line.split("#", 1)[0].strip()
+        if not s:
+            continue
+        if "=" not in s:
+            _die("%s:%d: not KEY=VALUE: %s" % (path, n, s))
+        k, v = (x.strip() for x in s.split("=", 1))
+        if k not in CONFIG_KEYS:
+            _die("%s:%d: unknown key '%s' (known: %s)"
+                 % (path, n, k, ", ".join(sorted(CONFIG_KEYS))))
+        cfg[k] = v
+    for k in CONFIG_KEYS:                       # env wins, for one-off testing
+        env = os.environ.get("NP_" + k.upper())
+        if env is not None:
+            cfg[k] = env
+    for k, cast in CONFIG_KEYS.items():
+        try:
+            cfg[k] = cast(cfg[k])
+        except (TypeError, ValueError):
+            _die("bad value for '%s': %r" % (k, cfg[k]))
+    if cfg["publish_hz"] <= 0:
+        _die("publish_hz must be positive (got %r)" % cfg["publish_hz"])
+    return cfg
 
 for n in ("pychromecast", "zeroconf"):
     logging.getLogger(n).setLevel(logging.ERROR)
@@ -65,8 +132,24 @@ _cast_uuid = None
 _art_cache = {}                      # art url -> local path
 _art_lock  = threading.Lock()
 
+_frame     = None                    # npframe.Writer (the published contract)
+_art_now   = ""                      # RESOLVED art path, published by publish()
+                                     # so the 30Hz frame loop never does I/O
+_track_id  = 0                       # bumped on every track change
+_track_key = None
+
 IDLE = {"status": "idle", "source": "", "device": "", "title": "", "artist": "",
         "album": "", "art": "", "position": 0.0, "length": 0.0, "at": 0.0}
+
+# Local MPRIS capabilities. OPTIMISTIC and not yet measured: MPRIS exposes
+# CanPause / CanGoNext / CanGoPrevious as PLAYER-INTERFACE properties, not as
+# metadata, and playerctl 2.4.1's --format reads metadata, so these cannot be
+# read on the current playerctl path. Reading them needs a direct D-Bus query.
+# Until then a set bit means "expected to work" rather than "measured", which
+# is the weaker half of the contract's guarantee; the CLEAR-bit direction (the
+# one a renderer must not offer) is exact on the cast side, where pychromecast
+# reports real flags. Do not widen this assumption to the cast path.
+LOCAL_CAPS = npframe.CAP_PAUSE | npframe.CAP_NEXT | npframe.CAP_PREV
 
 
 # ---- cover art ------------------------------------------------------------
@@ -105,7 +188,11 @@ def _fields(s):
     return {"status": s["status"], "title": s["title"], "artist": s["artist"],
             "album": s["album"], "art": s.get("art", ""),
             "position": s.get("position", 0.0), "length": s.get("length", 0.0),
-            "at": s.get("at", 0.0)}
+            "at": s.get("at", 0.0),
+            # frame-only: `caps` is what the LIVE source can actually do, and
+            # `mono` stamps the last REAL position sample so the daemon (never
+            # a consumer) can extrapolate from it.
+            "caps": s.get("caps", 0), "mono": s.get("mono", 0.0)}
 
 def _merged_locked():
     """Local wins whenever it has a track; the cast fallback fills the gap."""
@@ -131,13 +218,67 @@ def _write_state(state):
         sys.stderr.write("now-playing: state write failed (%s)\n" % e)
 
 def publish():
+    """Resolve art and refresh the legacy JSON projection. Called on metadata
+    change and on the slow poll, NEVER at frame rate: fetch_art can do network
+    I/O, which must stay off the publishing path."""
+    global _art_now
     with _lock:
         m = _merged_locked()
     if m is None:
+        _art_now = ""
         _write_state(dict(IDLE))
+        _frame_publish()
         return
     m["art"] = fetch_art(m.get("art", ""))     # resolve URL -> path
-    _write_state(m)
+    _art_now = m["art"]
+    # The JSON file is a TRANSITIONAL projection and does not carry the
+    # frame-only fields; it retires once every consumer reads the frame.
+    _write_state({k: v for k, v in m.items() if k not in ("caps", "mono")})
+    _frame_publish()
+
+
+# ---- the shared-memory frame ----------------------------------------------
+def _live_position(m):
+    """Position extrapolated from the last REAL sample. This is the one place
+    it happens: the daemon knows about seeks, rate and source switches, and a
+    consumer knows none of them, so a consumer is never asked to guess."""
+    p = m.get("position", 0.0)
+    if m.get("status") == "playing":
+        mono = m.get("mono", 0.0)
+        if mono > 0:
+            p += max(0.0, time.monotonic() - mono)
+    ln = m.get("length", 0.0)
+    if ln > 0 and p > ln:
+        p = ln
+    return p if p > 0 else 0.0
+
+
+def _frame_publish():
+    global _track_id, _track_key
+    if _frame is None:
+        return
+    with _lock:
+        m = _merged_locked()
+    art = _art_now
+    if m is None:
+        _frame.publish()                         # a complete IDLE frame
+        return
+    key = (m["title"], m["artist"], m["album"])
+    if key != _track_key:
+        _track_key = key
+        _track_id += 1
+    _frame.publish(status=npframe.STATUS_CODE.get(m["status"], 0),
+                   source=npframe.SOURCE_CODE.get(m["source"], 0),
+                   position=_live_position(m), length=m.get("length", 0.0),
+                   rate=1.0, caps=m.get("caps", 0), track_id=_track_id,
+                   title=m["title"], artist=m["artist"], album=m["album"],
+                   device=m.get("device", ""), art=art)
+
+
+def frame_loop(hz):
+    interval = 1.0 / hz
+    while not _shutdown.wait(interval):
+        _frame_publish()
 
 
 # ---- local position sampling ----------------------------------------------
@@ -155,10 +296,12 @@ def sample_positions():
         have_local = _local is not None and _local.get("title")
     if have_local:
         pos = _playerctl_position()
+        mono = time.monotonic()
         with _lock:
             if _local is not None:
                 _local["position"] = pos
                 _local["at"] = now
+                _local["mono"] = mono      # the anchor _live_position runs from
 
 def position_loop():
     while not _shutdown.wait(POLL_SECS):
@@ -245,7 +388,12 @@ def mpris_loop():
                           "album": album, "art": art, "length": length,
                           "position": (prev.get("position", 0.0)
                                         if same else 0.0),
-                          "at": prev.get("at", 0.0) if same else 0.0}
+                          "at": prev.get("at", 0.0) if same else 0.0,
+                          # A new track restarts the extrapolation anchor; the
+                          # same track keeps interpolating from its last sample.
+                          "mono": (prev.get("mono", 0.0) if same
+                                   else time.monotonic()),
+                          "caps": LOCAL_CAPS}
         publish()
 
 
@@ -254,6 +402,26 @@ def _to_status(ms):
     st = (ms.player_state or "").upper()
     return {"PLAYING": "playing", "BUFFERING": "playing",
             "PAUSED": "paused"}.get(st, "stopped")
+
+def _cast_caps(ms):
+    """What this cast app ACTUALLY supports, read from its media status. A
+    clear bit tells a renderer to draw the control inert rather than offer an
+    affordance that silently does nothing (queue_prev is the usual absentee).
+    getattr-guarded so a pychromecast version without a flag reads as absent
+    rather than raising."""
+    caps = 0
+    if getattr(ms, "supports_pause", False):
+        caps |= npframe.CAP_PAUSE
+    if (getattr(ms, "supports_skip_forward", False)
+            or getattr(ms, "supports_queue_next", False)):
+        caps |= npframe.CAP_NEXT
+    if (getattr(ms, "supports_skip_backward", False)
+            or getattr(ms, "supports_queue_prev", False)):
+        caps |= npframe.CAP_PREV
+    if getattr(ms, "supports_seek", False):
+        caps |= npframe.CAP_SEEK
+    return caps
+
 
 def _read_media(ms, name):
     art = ""
@@ -266,7 +434,8 @@ def _read_media(ms, name):
             "title": ms.title or "", "artist": ms.artist or "",
             "album": ms.album_name or "", "art": art,
             "position": ms.adjusted_current_time or 0.0,
-            "length": ms.duration or 0.0, "at": time.time()}
+            "length": ms.duration or 0.0, "at": time.time(),
+            "mono": time.monotonic(), "caps": _cast_caps(ms)}
 
 def _is_cast_media(cast_status):
     """True iff the RECEIVER status shows a real Cast media receiver already
@@ -443,6 +612,13 @@ def _cleanup(*_):
         return
     _shutdown.set()
     _write_state(dict(IDLE))
+    if _frame is not None:
+        # Publish a final IDLE frame so consumers see the stop AT ONCE instead
+        # of waiting out the staleness window on a frozen last track.
+        try:
+            _frame.publish()
+        except Exception:
+            pass
     try:
         if os.path.exists(CTL_FILE):
             os.unlink(CTL_FILE)
@@ -474,16 +650,200 @@ def _on_signal(signum, frame):
     _cleanup()                                   # main thread wakes from wait()
 
 
+# ---- command-line readers -------------------------------------------------
+# The daemon binary is also the reference CONSUMER, so the layout has exactly
+# one implementation on this side of the wire and the contract is testable
+# without building a renderer.
+USAGE = """usage: now-playing [COMMAND]
+
+  (no command)            run the daemon
+  status [--json] [--follow] [--interval SECS]
+                          print the current frame; --follow streams on change,
+                          --interval SECS streams at a fixed cadence instead
+  shm-info [--json]       segment path, layout version, geometry, liveness"""
+
+
+def _mmss(s):
+    s = int(max(0.0, s) + 0.5)
+    return "%d:%02d" % (s // 60, s % 60)
+
+
+def _open_reader():
+    try:
+        return npframe.Reader()
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return None
+
+
+def _sample(slot):
+    """Read a frame, (re)opening the mapping when we have none. The retry is
+    what lets a consumer start BEFORE the daemon and pick it up later; the
+    daemon never unlinks the segment, so a live mapping survives a restart."""
+    if slot[0] is None:
+        slot[0] = _open_reader()
+        if slot[0] is None:
+            return None
+    try:
+        return slot[0].read()
+    except npframe.FrameVersionError as e:
+        sys.stderr.write("now-playing: %s\n" % e)
+        raise SystemExit(3)
+
+
+def _status_lines(f):
+    rows = [("status", f["status"]), ("source", f["source"] or "-")]
+    if f["device"]:
+        rows.append(("device", f["device"]))
+    for k in ("title", "artist", "album"):
+        if f[k]:
+            rows.append((k, f[k]))
+    if f["length"] > 0:
+        rows.append(("position", "%s / %s" % (_mmss(f["position"]),
+                                              _mmss(f["length"]))))
+    elif f["status"] != "idle":
+        rows.append(("position", _mmss(f["position"])))
+    rows.append(("caps", " ".join(f["caps_names"]) or "-"))
+    if f["bands"]:
+        rows.append(("bands", str(len(f["bands"]))))
+    rows.append(("track", str(f["track_id"])))
+    rows.append(("age", "%.2fs" % npframe.age_secs(f)))
+    return "\n".join("%-9s %s" % (k, v) for k, v in rows)
+
+
+def _discrete_key(f):
+    """What --follow reacts to by default: the EVENTFUL half of the frame.
+    Position moves every frame, so reacting to it would make a script consumer
+    a firehose; --interval is there for a caller that wants the motion."""
+    if f is None:
+        return None
+    return (f["status"], f["source"], f["title"], f["artist"], f["album"],
+            f["device"], f["art"], f["caps"], f["track_id"])
+
+
+def _emit(f, as_json):
+    live = npframe.is_live(f)
+    if as_json:
+        out = dict(f) if f else {}
+        out["live"] = live
+        out["age"] = round(npframe.age_secs(f), 4) if f else None
+        print(json.dumps(out, ensure_ascii=False), flush=True)
+    elif live:
+        print(_status_lines(f), flush=True)
+    else:
+        print("status    unavailable (no live frame)", flush=True)
+    return live
+
+
+def _status_args(argv):
+    as_json = follow = False
+    interval = None
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--json":
+            as_json = True
+        elif a == "--follow":
+            follow = True
+        elif a == "--interval":
+            i += 1
+            if i >= len(argv):
+                _die("status: --interval needs SECONDS")
+            try:
+                interval = float(argv[i])
+            except ValueError:
+                _die("status: --interval: not a number: %s" % argv[i])
+            if interval <= 0:
+                _die("status: --interval must be positive")
+            follow = True
+        else:
+            _die("status: unknown option '%s'\n%s" % (a, USAGE))
+        i += 1
+    return as_json, follow, interval
+
+
+def cmd_status(argv):
+    as_json, follow, interval = _status_args(argv)
+    slot = [_open_reader()]
+    if not follow:
+        return 0 if _emit(_sample(slot), as_json) else 1
+    last = object()                       # a sentinel no key can equal
+    try:
+        while True:
+            f = _sample(slot)
+            if interval is not None:
+                _emit(f, as_json)
+            else:
+                key = (_discrete_key(f), npframe.is_live(f))
+                if key != last:
+                    last = key
+                    _emit(f, as_json)
+            time.sleep(interval if interval is not None else 0.05)
+    except (KeyboardInterrupt, BrokenPipeError):
+        return 0
+
+
+def cmd_shm_info(argv):
+    for a in argv:
+        if a != "--json":
+            _die("shm-info: unknown option '%s'\n%s" % (a, USAGE))
+    as_json = "--json" in argv
+    path = npframe.frame_path()
+    info = {"path": path, "understands_version": npframe.VERSION,
+            "max_bands": npframe.MAX_BANDS, "version": None,
+            "frame_bytes": None, "live": False, "present": False}
+    try:
+        _magic, ver, fb = npframe.peek_header(path)
+        info.update(present=True, version=ver, frame_bytes=fb)
+    except OSError:
+        pass
+    if info["version"] == npframe.VERSION:
+        # Only ask for a coherent read when the version is one we parse; the
+        # whole point of this command is to REPORT a mismatch, not die on it.
+        info["live"] = npframe.is_live(_sample([_open_reader()]))
+    if as_json:
+        print(json.dumps(info), flush=True)
+    else:
+        for k in ("path", "present", "version", "understands_version",
+                  "frame_bytes", "max_bands", "live"):
+            v = info[k]
+            print("%-19s %s" % (k, "-" if v is None else v))
+    return 0 if info["present"] else 1
+
+
 # ---- main -----------------------------------------------------------------
-def main():
+def run_daemon():
+    global PLAYERS, _frame
+    cfg = load_config()
+    PLAYERS = cfg["players"]
     signal.signal(signal.SIGINT, _on_signal)
     signal.signal(signal.SIGTERM, _on_signal)
+    _frame = npframe.Writer()                    # publishes an idle frame
     publish()                                    # initial idle
     threading.Thread(target=mpris_loop, daemon=True).start()
     threading.Thread(target=ctl_loop, daemon=True).start()
     threading.Thread(target=position_loop, daemon=True).start()
     threading.Thread(target=cast_main, daemon=True).start()
+    threading.Thread(target=frame_loop, args=(cfg["publish_hz"],),
+                     daemon=True).start()
     _shutdown.wait()                             # until a signal
+    return 0
+
+
+def main(argv):
+    if not argv:
+        return run_daemon()
+    cmd, rest = argv[0], argv[1:]
+    if cmd in ("-h", "--help", "help"):
+        print(USAGE)
+        return 0
+    if cmd == "status":
+        return cmd_status(rest)
+    if cmd == "shm-info":
+        return cmd_shm_info(rest)
+    _die("unknown command '%s'\n%s" % (cmd, USAGE))
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main(sys.argv[1:]))

@@ -8,17 +8,28 @@ now-playing \- media "now playing" state daemon (MPRIS + Chromecast fallback)
 .br
 .B np-ctl
 \fBplaypause\fR|\fBnext\fR|\fBprevious\fR
+.br
+.B now-playing
+[\fBstatus\fR [\fB--json\fR] [\fB--follow\fR] [\fB--interval\fR \fISECS\fR] |\
+ \fBshm-info\fR]
 .SH DESCRIPTION
 .B now-playing
 is a systemd
 .B --user
 daemon that reads the current media state \(em the local MPRIS player via
 playerctl, or a Chromecast via pychromecast when casting \(em and publishes it
-as JSON to
-.IR $XDG_RUNTIME_DIR/now-playing.state .
-A widget (for example a bar's media card) reads that file to render title,
-artist, art, and a progress scrubber. The state-file path is the CONTRACT; the
-daemon and the widget are otherwise decoupled.
+as a shared-memory frame at
+.IR $XDG_RUNTIME_DIR/now-playing.frame .
+A widget (for example a bar's media card) maps that page to render title,
+artist, art, a progress scrubber, which transport controls are usable, and an
+audio spectrum.
+.PP
+The daemon is the MODEL and a consumer is a VIEW. Every frame is complete, so a
+consumer renders what it is handed and derives no playback facts of its own. Any
+number of consumers may map the frame at once, each on its own clock, and the
+daemon neither knows nor cares how many there are. The full specification is
+.IR docs/contract.md ;
+read it before writing a consumer.
 .PP
 .B np-ctl
 sends a transport command (playpause, next, previous) to the daemon's control
@@ -39,9 +50,34 @@ Build the daemon venv (pychromecast) and enable its --user service.
 install + service.
 .TP
 .B check
-Command + deps present, venv + service up, as
+Command + deps present, venv + service up, and the frame actually LIVE (a
+stronger claim than an active unit: it proves the daemon is publishing), as
 .RB [ OK ]/[ FAIL ]
 markers.
+.TP
+.B status
+Print the current frame and exit.
+.B --json
+emits it machine-readably.
+.B --follow
+streams, emitting when something EVENTFUL changes (track, state, artwork,
+capabilities); position deliberately does not count, since it moves every frame.
+.B --interval
+\fISECS\fR streams on a clock instead, position included. Exit status is 0 for a
+live frame, 1 when there is none, 2 for usage, 3 for an unreadable layout
+version.
+.TP
+.B shm-info
+Print the segment path, layout version, geometry and liveness. Its real job is
+version negotiation, so it reports a layout mismatch rather than failing on it.
 .SH NOTES
 playerctl is a system binary, not a venv dependency; the venv carries only
 pychromecast (used only while casting; local playback needs none of it).
+.PP
+The JSON file at
+.I $XDG_RUNTIME_DIR/now-playing.state
+is NOT part of the contract. It is still written, at about 1Hz, purely as a
+transitional courtesy; it carries no capabilities and no spectrum, and it will
+be removed. Use
+.B status
+instead.

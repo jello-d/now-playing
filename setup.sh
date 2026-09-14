@@ -13,12 +13,13 @@
 #   ./setup.sh test        run the in-repo suite (test/run)
 #   ./setup.sh version     the packaged version
 #
-# POSIX sh, non-privileged. The daemon publishes $XDG_RUNTIME_DIR/now-playing.
-# state (JSON) and reads transport from now-playing.ctl (np-ctl writes it) --
-# that state-file path is the CONTRACT a widget reads (e.g. a waybar media card
-# pointed at it via its state-path/ctl-cmd config). playerctl is a SYSTEM
-# binary, not a venv dep; the venv carries only pychromecast (the cast
-# fallback), like bt-sane's tray venv.
+# POSIX sh, non-privileged. The daemon publishes a SHARED-MEMORY FRAME at
+# $XDG_RUNTIME_DIR/now-playing.frame -- the contract a widget reads, specified
+# in docs/contract.md -- and takes transport on now-playing.ctl (np-ctl writes
+# it). `now-playing status` is the shell-facing reader of the same frame, so a
+# script needs no special support. playerctl is a SYSTEM binary, not a venv dep;
+# the venv carries only pychromecast (the cast fallback), like bt-sane's tray
+# venv.
 set -eu
 
 PKG=now-playing
@@ -126,6 +127,20 @@ do_check() {
       "")     : ;;   # no session bus (headless) -- runtime state unknowable
       *)      bad "now-playing.service '$_st', not active (crash-loop?)" ;;
     esac
+    # A LIVE frame is a STRONGER claim than an active unit: it proves the
+    # daemon is actually PUBLISHING, not merely running. Same session gate --
+    # no frame at all means the daemon has never run in this session (a
+    # headless provision), which is unknowable rather than wrong. The reader
+    # is stdlib-only, so the system python3 runs it without the venv.
+    if command -v python3 >/dev/null 2>&1; then
+      _fr=$(python3 "$_root/libexec/now-playing" shm-info --json \
+            2>/dev/null || true)
+      case "$_fr" in
+        *'"live": true'*)    ok "frame live (daemon publishing)" ;;
+        *'"present": true'*) bad "frame STALE; daemon up but not publishing" ;;
+        *)                   : ;;
+      esac
+    fi
   else
     warn "daemon not installed (run setup.sh service for it)"
   fi
