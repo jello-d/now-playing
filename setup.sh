@@ -63,19 +63,23 @@ do_install() {
   echo "$PKG: linked np-ctl (+ man) into $PREFIX"
 }
 
+# The launcher's EXACT content, in one place, so `check` can assert byte
+# equality instead of keeping a second, driftable description of it. It execs
+# the venv python on THIS tree's daemon; that is all the --user unit needs on
+# PATH (it replaced the old venv-run shebang).
+_launcher_body() {
+  printf '#!/bin/sh\nexec "%s" "%s" "$@"\n' \
+    "$VENV/bin/python" "$_root/libexec/now-playing"
+}
+
 do_service() {
   command -v python3 >/dev/null 2>&1 || {
     echo "$PKG: python3 absent; no daemon venv" >&2; return 1; }
   [ -d "$VENV" ] || python3 -m venv "$VENV"
   "$VENV/bin/pip" install -q --upgrade pip
   "$VENV/bin/pip" install -q -r "$_root/libexec/now-playing.reqs"
-  # A launcher: exec the venv python on the packaged daemon (replaces the old
-  # venv-run shebang; this launcher is all the --user unit needs on PATH).
   mkdir -p "$_bin"
-  cat > "$_bin/now-playing" <<EOF
-#!/bin/sh
-exec "$VENV/bin/python" "$_root/libexec/now-playing" "\$@"
-EOF
+  _launcher_body > "$_bin/now-playing"
   chmod +x "$_bin/now-playing"
   mkdir -p "$_usr"
   cp "$_root/systemd/now-playing.service" "$_usr/now-playing.service"
@@ -111,6 +115,18 @@ do_check() {
     command -v "$_d" >/dev/null 2>&1 && ok "dep $_d present" \
       || warn "dep $_d absent (a feature degrades)"; done
   if [ -e "$_bin/now-playing" ]; then
+    # The launcher is GENERATED, not a symlink, so readlink cannot audit it:
+    # compare it byte-for-byte with what `service` would write right now. A
+    # launcher left pointing at a tree that has since moved (a staged checkout,
+    # or a source dir borrowed for testing) keeps a RUNNING daemon alive and
+    # only bites on the NEXT restart, so every other assertion here stays green
+    # while the box is one restart away from a crash-loop. That is exactly how
+    # this hid for days once; asserted-vs-actual drift is the thing to detect.
+    if [ "$(cat "$_bin/now-playing" 2>/dev/null)" = "$(_launcher_body)" ]; then
+      ok "launcher current (execs this tree's daemon)"
+    else
+      bad "launcher STALE or foreign, not $_root (setup.sh service)"
+    fi
     [ -x "$VENV/bin/python" ] && ok "daemon venv present" \
       || bad "launcher present but venv missing (setup.sh service)"
     # enabled = will start next login (headless-safe: reads the unit file).

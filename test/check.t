@@ -9,8 +9,10 @@ harness_init check
 
 mkdir -p "$T/local/bin" "$T/bin" "$T/venv/bin"
 ln -sfn "$HERE/bin/np-ctl" "$T/local/bin/np-ctl"   # np-ctl linked
-: > "$T/local/bin/now-playing"                     # launcher present
 : > "$T/venv/bin/python"; chmod +x "$T/venv/bin/python"   # venv present
+# A launcher matching what `service` would write for THIS tree + venv.
+printf '#!/bin/sh\nexec "%s" "%s" "$@"\n' \
+  "$T/venv/bin/python" "$HERE/libexec/now-playing" > "$T/local/bin/now-playing"
 
 # stub systemctl: enabled always; is-active echoes $FAKE_ACTIVE (empty = the
 # bus does not answer, i.e. a headless provision -> print nothing, non-zero).
@@ -47,5 +49,19 @@ ck activating >/dev/null 2>&1 \
 out=$(ck "") || fail "check failed with no session bus (want enabled-only pass)"
 echo "$out" | grep -q 'service enabled' || fail "no enabled report (headless)"
 echo "$out" | grep -q 'service active' && fail "claimed active with no bus" || :
+
+# A launcher pointing somewhere ELSE must FAIL, even though every other
+# assertion is green and a still-running daemon keeps the service active. This
+# is the stale-launcher trap: it only bites on the next restart, so a check that
+# merely tests existence reports a healthy box that is one restart from a
+# crash-loop.
+out=$(ck active) || fail "check failed on a good launcher"
+echo "$out" | grep -q 'launcher current' || fail "no launcher report: $out"
+
+printf '#!/bin/sh\nexec /nowhere/python /nowhere/daemon "$@"\n' \
+  > "$T/local/bin/now-playing"
+ck active >/dev/null 2>&1 && fail "check passed with a FOREIGN launcher" || :
+out=$(ck active 2>&1 || :)
+echo "$out" | grep -q 'launcher STALE or foreign' || fail "bad report: $out"
 
 pass
