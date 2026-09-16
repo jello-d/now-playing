@@ -1,9 +1,9 @@
 #!/bin/sh
 # setup.sh - install / uninstall / check the now-playing media suite: the
 # now-playing daemon (a local MPRIS reader over playerctl, with a read-only-
-# gated Chromecast fallback for when casting) that publishes now-playing.state,
-# plus np-ctl (the transport command a media widget calls). The SINGLE entry
-# point a consumer or provisioning layer uses.
+# gated Chromecast fallback for when casting) that publishes the now-playing
+# frame, plus np-ctl (the transport command a media widget calls). The SINGLE
+# entry point a consumer or provisioning layer uses.
 #
 #   ./setup.sh install     link np-ctl (+ man) into ~/.local
 #   ./setup.sh service     build the daemon venv + enable its --user service

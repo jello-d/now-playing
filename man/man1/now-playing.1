@@ -74,10 +74,9 @@ version negotiation, so it reports a layout mismatch rather than failing on it.
 playerctl is a system binary, not a venv dependency; the venv carries only
 pychromecast (used only while casting; local playback needs none of it).
 .PP
-The JSON file at
+The frame is the ONLY published state. An earlier JSON file at
 .I $XDG_RUNTIME_DIR/now-playing.state
-is NOT part of the contract. It is still written, at about 1Hz, purely as a
-transitional courtesy; it carries no capabilities and no spectrum, and it will
-be removed. Use
+has been removed: a second projection of the same facts is a second thing that
+can drift. Use
 .B status
-instead.
+for a shell-facing read of the frame.

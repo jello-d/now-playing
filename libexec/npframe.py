@@ -205,11 +205,18 @@ class Writer:
         # on. It would NOT hold on a weakly ordered target such as ARM, where
         # this writer needs a real fence before the final store. The reader
         # side is already portable. See docs/contract.md.
-        seq = self._seq + 1
+        # Masked to 32 bits: the counter is a u32 on the wire, and an unmasked
+        # Python int walks straight past the ceiling into a struct.error that
+        # would stop publishing for good (~2.3 years at 30Hz, and the exception
+        # escapes through every caller of publish()). Wrapping is harmless
+        # because readers compare the counter for EQUALITY, never for order, and
+        # 2**32 is even so the odd/even parity survives the wrap.
+        seq = (self._seq + 1) & 0xFFFFFFFF
         struct.pack_into("<I", self._mm, O_SEQ, seq)            # odd: in flight
         self._mm[O_PAYLOAD:O_PAYLOAD_END] = p                   # one memcpy
-        struct.pack_into("<I", self._mm, O_SEQ, seq + 1)        # even: complete
-        self._seq = seq + 1
+        nxt = (seq + 1) & 0xFFFFFFFF
+        struct.pack_into("<I", self._mm, O_SEQ, nxt)            # even: complete
+        self._seq = nxt
 
 
 class Reader:

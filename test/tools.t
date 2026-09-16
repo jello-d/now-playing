@@ -20,11 +20,14 @@ grep -q '^import npframe' "$HERE/libexec/now-playing" \
 grep -qE '0x0[0-9A-Fa-f]{3}' "$HERE/libexec/now-playing" \
   && fail "daemon hardcodes a frame offset; use npframe" || :
 [ -f "$HERE/docs/contract.md" ] || fail "docs/contract.md missing"
-# TRANSITIONAL: the JSON projection still feeds the deployed waybar card until
-# it reads the frame. Keep asserting it until that consumer is cut over, so a
-# daemon change cannot break the live bar before its replacement is in place.
-grep -q 'now-playing.state' "$HERE/libexec/now-playing" \
-  || fail "daemon dropped now-playing.state while a consumer still reads it"
+# The JSON projection is RETIRED: the frame is the only published state. Assert
+# it stays gone, so it cannot creep back as a second source of truth that is
+# free to disagree with the frame.
+grep -q 'os.unlink(os.path.join(RUN, "now-playing.state"))' \
+  "$HERE/libexec/now-playing" \
+  || fail "daemon no longer sweeps the retired state file (it would go stale)"
+grep -q 'STATE_FILE\|_write_state' "$HERE/libexec/now-playing" \
+  && fail "the retired JSON state writer is back" || :
 grep -q 'ExecStart=%h/.local/bin/now-playing' \
   "$HERE/systemd/now-playing.service" \
   || fail "unit ExecStart is not the ~/.local launcher"

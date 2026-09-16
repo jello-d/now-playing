@@ -23,10 +23,6 @@ needs, complete every time, coherent by seqlock. THE DAEMON INTERPOLATES
 position between real samples; a consumer never does, and never consults a
 second source of truth.
 
-Also still publishes the legacy JSON STATE_FILE. That projection is
-TRANSITIONAL and retires once every consumer reads the frame; the frame is the
-contract.
-
 Transport arrives over a control FIFO (np-ctl): routed to the live cast's media
 controller while casting, else to playerctl. Output is continuous, lossy and
 multi-consumer (shared memory); input is discrete, rare and must not be dropped
@@ -47,7 +43,6 @@ import npframe                                   # noqa: E402  (sibling module)
 
 US         = "\x1f"
 RUN        = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
-STATE_FILE = os.path.join(RUN, "now-playing.state")
 CTL_FILE   = os.path.join(RUN, "now-playing.ctl")
 POLL_SECS  = 1.5                     # local position re-sample / re-publish
 CAST_SECS  = 2.0                     # cast reconcile / status-refresh cadence
@@ -114,7 +109,6 @@ for n in ("pychromecast", "zeroconf"):
     logging.getLogger(n).setLevel(logging.ERROR)
 
 _lock      = threading.Lock()
-_laststate = None                    # last written JSON (dedupe writes)
 _local     = None                    # local MPRIS dict or None
 _cast      = None                    # active cast dict or None
 
@@ -137,9 +131,6 @@ _art_now   = ""                      # RESOLVED art path, published by publish()
                                      # so the 30Hz frame loop never does I/O
 _track_id  = 0                       # bumped on every track change
 _track_key = None
-
-IDLE = {"status": "idle", "source": "", "device": "", "title": "", "artist": "",
-        "album": "", "art": "", "position": 0.0, "length": 0.0, "at": 0.0}
 
 # Local MPRIS capabilities. OPTIMISTIC and not yet measured: MPRIS exposes
 # CanPause / CanGoNext / CanGoPrevious as PLAYER-INTERFACE properties, not as
@@ -188,10 +179,9 @@ def _fields(s):
     return {"status": s["status"], "title": s["title"], "artist": s["artist"],
             "album": s["album"], "art": s.get("art", ""),
             "position": s.get("position", 0.0), "length": s.get("length", 0.0),
-            "at": s.get("at", 0.0),
-            # frame-only: `caps` is what the LIVE source can actually do, and
-            # `mono` stamps the last REAL position sample so the daemon (never
-            # a consumer) can extrapolate from it.
+            # `caps` is what the LIVE source can actually do; `mono` stamps
+            # the last REAL position sample so the daemon (never a consumer)
+            # can extrapolate from it.
             "caps": s.get("caps", 0), "mono": s.get("mono", 0.0)}
 
 def _merged_locked():
@@ -203,37 +193,19 @@ def _merged_locked():
                     **_fields(_cast))
     return None
 
-def _write_state(state):
-    global _laststate
-    s = json.dumps(state, ensure_ascii=False)
-    if s == _laststate:
-        return
-    _laststate = s
-    try:
-        tmp = STATE_FILE + ".tmp"
-        with open(tmp, "w") as f:
-            f.write(s + "\n")
-        os.replace(tmp, STATE_FILE)
-    except Exception as e:
-        sys.stderr.write("now-playing: state write failed (%s)\n" % e)
-
 def publish():
-    """Resolve art and refresh the legacy JSON projection. Called on metadata
-    change and on the slow poll, NEVER at frame rate: fetch_art can do network
-    I/O, which must stay off the publishing path."""
+    """Resolve the artwork, then publish. Called on metadata change and on the
+    slow poll, NEVER at frame rate: fetch_art can do network I/O, which must
+    stay off the publishing path."""
     global _art_now
     with _lock:
         m = _merged_locked()
     if m is None:
         _art_now = ""
-        _write_state(dict(IDLE))
         _frame_publish()
         return
     m["art"] = fetch_art(m.get("art", ""))     # resolve URL -> path
     _art_now = m["art"]
-    # The JSON file is a TRANSITIONAL projection and does not carry the
-    # frame-only fields; it retires once every consumer reads the frame.
-    _write_state({k: v for k, v in m.items() if k not in ("caps", "mono")})
     _frame_publish()
 
 
@@ -291,7 +263,6 @@ def _playerctl_position():
         return 0.0
 
 def sample_positions():
-    now = time.time()
     with _lock:
         have_local = _local is not None and _local.get("title")
     if have_local:
@@ -300,7 +271,6 @@ def sample_positions():
         with _lock:
             if _local is not None:
                 _local["position"] = pos
-                _local["at"] = now
                 _local["mono"] = mono      # the anchor _live_position runs from
 
 def position_loop():
@@ -358,7 +328,10 @@ def ctl_loop():
 
 
 # ---- local MPRIS source ---------------------------------------------------
-def mpris_loop():
+def _mpris_follow():
+    """ONE run of the playerctl follower, returning when it exits for any
+    reason. False means playerctl is absent, which no amount of retrying
+    fixes; True means it ran and then ended, which is worth retrying."""
     global _local, _proc
     fmt = US.join(("{{lc(status)}}", "{{artist}}", "{{title}}", "{{album}}",
                    "{{mpris:artUrl}}", "{{mpris:length}}"))
@@ -368,8 +341,7 @@ def mpris_loop():
         _proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
                                  stderr=subprocess.DEVNULL, text=True)
     except FileNotFoundError:
-        sys.stderr.write("now-playing: playerctl not found; local source off\n")
-        return
+        return False
     for line in _proc.stdout:
         parts = (line.rstrip("\n").split(US) + [""] * 6)[:6]
         status, artist, title, album, art, length_us = parts
@@ -388,13 +360,46 @@ def mpris_loop():
                           "album": album, "art": art, "length": length,
                           "position": (prev.get("position", 0.0)
                                         if same else 0.0),
-                          "at": prev.get("at", 0.0) if same else 0.0,
                           # A new track restarts the extrapolation anchor; the
                           # same track keeps interpolating from its last sample.
                           "mono": (prev.get("mono", 0.0) if same
                                    else time.monotonic()),
                           "caps": LOCAL_CAPS}
         publish()
+    return True
+
+
+def mpris_loop():
+    """SUPERVISE the follower. playerctl can exit under us (a D-Bus restart, a
+    crash), and when it does, whatever it last reported becomes UNKNOWABLE.
+    Leaving that last track published would be the one lie this design must not
+    tell: the frame's heartbeat would stay fresh while the data froze, and every
+    consumer is instructed to trust a fresh heartbeat. So DROP the local source
+    first, publish that honestly, and only then restart.
+
+    Backoff doubles to a ceiling so a permanently broken playerctl cannot spin,
+    and resets after a run long enough to count as healthy."""
+    global _local
+    delay = 1.0
+    while not _shutdown.is_set():
+        started = time.monotonic()
+        alive = _mpris_follow()
+        if _shutdown.is_set():
+            return
+        if not alive:
+            sys.stderr.write(
+                "now-playing: playerctl not found; local source off\n")
+            return
+        with _lock:
+            _local = None
+        publish()                       # idle, not a phantom track
+        sys.stderr.write(
+            "now-playing: playerctl follower exited; restarting in %.0fs\n"
+            % delay)
+        if time.monotonic() - started > 30.0:
+            delay = 1.0                 # it ran a healthy while; start over
+        _shutdown.wait(delay)
+        delay = min(delay * 2.0, 30.0)
 
 
 # ---- Chromecast FALLBACK --------------------------------------------------
@@ -434,7 +439,7 @@ def _read_media(ms, name):
             "title": ms.title or "", "artist": ms.artist or "",
             "album": ms.album_name or "", "art": art,
             "position": ms.adjusted_current_time or 0.0,
-            "length": ms.duration or 0.0, "at": time.time(),
+            "length": ms.duration or 0.0,
             "mono": time.monotonic(), "caps": _cast_caps(ms)}
 
 def _is_cast_media(cast_status):
@@ -611,7 +616,6 @@ def _cleanup(*_):
     if _shutdown.is_set():
         return
     _shutdown.set()
-    _write_state(dict(IDLE))
     if _frame is not None:
         # Publish a final IDLE frame so consumers see the stop AT ONCE instead
         # of waiting out the staleness window on a frozen last track.
@@ -819,6 +823,14 @@ def run_daemon():
     PLAYERS = cfg["players"]
     signal.signal(signal.SIGINT, _on_signal)
     signal.signal(signal.SIGTERM, _on_signal)
+    # Sweep the RETIRED JSON projection. It lives in tmpfs, so a file left by an
+    # older daemon would sit there with frozen content until reboot, looking
+    # exactly like live state to anyone debugging. A removed thing should leave
+    # nothing behind that can still be read.
+    try:
+        os.unlink(os.path.join(RUN, "now-playing.state"))
+    except OSError:
+        pass
     _frame = npframe.Writer()                    # publishes an idle frame
     publish()                                    # initial idle
     threading.Thread(target=mpris_loop, daemon=True).start()

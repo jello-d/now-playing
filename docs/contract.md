@@ -21,15 +21,11 @@ This asymmetry is deliberate, not an accident of history.
 - IN (consumer -> daemon): the control FIFO (`np-ctl`). Discrete, rare, and
   must not be dropped. A missed play/pause is a bug; a missed frame is not.
 
-The JSON state file is NOT part of this contract. It forced one publish rate
-on every consumer, and a second projection of the same facts is a second thing
-that can drift; `now-playing status` replaces it (see CLI).
-
-It is still WRITTEN, at about 1Hz, purely as a transitional courtesy while any
-straggling consumer migrates. Do not read it, do not build on it, and do not
-treat its contents as authoritative: it carries no capabilities, no spectrum,
-and a position sampled at its own slow cadence. It goes away, and nothing here
-changes when it does.
+There is no state file. The earlier JSON at `now-playing.state` is REMOVED: it
+forced one publish rate on every consumer, and a second projection of the same
+facts is a second thing free to drift from the first. `now-playing status` is
+its replacement (see CLI) and reads this same frame, so a shell consumer and a
+bar cannot disagree about what is playing.
 
 ## The frame
 
