@@ -117,6 +117,34 @@ d._local = local(title="OTHER")
 d._frame_publish()
 assert r.read()["track_id"] == first + 1, "track_id did not bump on a new track"
 
+# SPECTRUM BANDS RIDE THE FRAME, and only for LOCAL playback. A cast decodes
+# on the device, so there is no local PCM; publishing the sink monitor against
+# a cast track would describe audio the listener is not hearing.
+class FakeSpec:
+    def __init__(self, bands, active=True): self.b, self.a = bands, active
+    def read(self): return list(self.b), self.a
+d._spectrum = FakeSpec([0.1, 0.5, 0.9])
+assert d._bands_for({"source": "local"}) == [0.1, 0.5, 0.9]
+assert d._bands_for({"source": "cast"}) is None, \
+    "bands published for a CAST source (the audio is not local)"
+d._spectrum = FakeSpec([0.1, 0.5, 0.9], active=False)
+assert d._bands_for({"source": "local"}) is None, "silence published as bands"
+d._spectrum = None
+assert d._bands_for({"source": "local"}) is None
+
+# the analyser's band layout must match what the view used to compute, or a
+# user's existing tuning changes meaning across the move
+import npspectrum as NS
+sp = NS.Spectrum.__new__(NS.Spectrum)
+sp.bands_n, sp.fft, sp.rate = 24, 4096, 44100.0
+sp.fmin, sp.fmax, sp.tilt = 45.0, 16000.0, 3.5
+sp._build_bands()
+assert sp._lo[0] >= 1 and sp._hi[-1] <= sp.fft // 2, "bins outside the spectrum"
+assert all(sp._lo[i] < sp._hi[i] for i in range(24)), "empty band"
+assert all(sp._lo[i] <= sp._lo[i+1] for i in range(23)), "bands not ascending"
+# tilt crosses zero at the geometric-mean pivot: lows trimmed, highs lifted
+assert sp._tiltdb[0] < 0 < sp._tiltdb[-1], "tilt does not straddle the pivot"
+
 # NO SOURCE publishes a complete IDLE frame, not a stale one.
 d._local = None
 d._frame_publish()

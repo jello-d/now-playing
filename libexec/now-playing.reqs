@@ -5,3 +5,9 @@
 # never driven unless a real Cast media receiver is already running.
 # playerctl is a SYSTEM binary (packages/), not a venv dep.
 pychromecast==14.0.10
+
+# numpy: the daemon-side audio analyser (libexec/npspectrum.py). The DSP moved
+# out of the waybar card so a view stops acquiring signal, and the FFT needs
+# this. Deliberately NOT a pure-python FFT: at 4096 points every ~46 ms a
+# python loop would cost more CPU than the whole daemon does today.
+numpy>=1.24

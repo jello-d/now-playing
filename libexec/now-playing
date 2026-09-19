@@ -55,9 +55,22 @@ MEDIA_NS   = "urn:x-cast:com.google.cast.media"
 # nothing executed). An UNKNOWN KEY IS A LOUD ERROR: a silently ignored typo in
 # a tunable would simply never take effect and be found months later. Every key
 # is overridable by NP_<KEY> in the environment for one-off testing.
-CONFIG_KEYS = {"players": str, "publish_hz": float}
+# The spectrum keys describe the SIGNAL, so they live with the producer; how it
+# LOOKS (caps, dots, colours, scrim) stays in the renderer's own config. These
+# were deliberately REFUSED as unknown keys until the analyser actually moved
+# here, because accepting an inert key is precisely the silent no-op this format
+# exists to prevent. The analyser has moved, so they mean something now.
+CONFIG_KEYS = {"players": str, "publish_hz": float,
+               "spectrum": str, "bands": int, "fft": int, "rate": float,
+               "fmin": float, "fmax": float, "gain": float, "floor_db": float,
+               "tilt": float, "attack": float, "decay": float,
+               "active_rms": float}
 CONFIG_DEFAULTS = {"players": "YoutubeMusic,chrome,chromium",
-                   "publish_hz": 30.0}
+                   "publish_hz": 30.0,
+                   "spectrum": "off", "bands": 24, "fft": 4096, "rate": 44100.0,
+                   "fmin": 45.0, "fmax": 16000.0, "gain": 2.0,
+                   "floor_db": -60.0, "tilt": 3.5, "attack": 0.65,
+                   "decay": 0.16, "active_rms": 4e-4}
 PLAYERS = CONFIG_DEFAULTS["players"]     # set from config before threads start
 
 
@@ -104,6 +117,23 @@ def load_config():
             _die("bad value for '%s': %r" % (k, cfg[k]))
     if cfg["publish_hz"] <= 0:
         _die("publish_hz must be positive (got %r)" % cfg["publish_hz"])
+    # Validate the DSP the same way: a value that cannot work should say so at
+    # startup, not produce a silently wrong picture for months.
+    if cfg["spectrum"] not in ("on", "off"):
+        _die("spectrum must be 'on' or 'off' (got %r)" % cfg["spectrum"])
+    if not 1 <= cfg["bands"] <= npframe.MAX_BANDS:
+        _die("bands must be 1..%d (got %r)" % (npframe.MAX_BANDS,
+                                               cfg["bands"]))
+    if cfg["fft"] < 64 or (cfg["fft"] & (cfg["fft"] - 1)):
+        _die("fft must be a power of two >= 64 (got %r)" % cfg["fft"])
+    if not 0 < cfg["fmin"] < cfg["fmax"]:
+        _die("need 0 < fmin < fmax (got %r, %r)" % (cfg["fmin"], cfg["fmax"]))
+    if cfg["fmax"] > cfg["rate"] / 2:
+        _die("fmax %r is above the Nyquist limit for rate %r"
+             % (cfg["fmax"], cfg["rate"]))
+    for k in ("attack", "decay"):
+        if not 0 < cfg[k] <= 1:
+            _die("%s must be in (0, 1] (got %r)" % (k, cfg[k]))
     return cfg
 
 for n in ("pychromecast", "zeroconf"):
@@ -128,6 +158,7 @@ _art_cache = {}                      # art url -> local path
 _art_lock  = threading.Lock()
 
 _frame     = None                    # npframe.Writer (the published contract)
+_spectrum  = None                    # npspectrum.Spectrum, or None when off
 _art_now   = ""                      # RESOLVED art path, published by publish()
                                      # so the 30Hz frame loop never does I/O
 _track_id  = 0                       # bumped on every track change
@@ -226,6 +257,24 @@ def _live_position(m):
     return p if p > 0 else 0.0
 
 
+def _bands_for(m):
+    """Bands for THIS source, or None.
+
+    A cast decodes on the device, so there is no local PCM and the honest
+    answer is NO BANDS (band_count 0, which the contract already defines as "no
+    spectrum available"). The sink monitor would still be carrying whatever
+    this box happens to be playing, and publishing that against a cast track
+    would be a confident lie -- the analyser would be describing audio the
+    listener is not hearing. Measured 2026-09-18: the published position leads
+    the actual acoustic output by +1.7 s (YouTube Music) to +8.0 s (Default
+    Media Receiver), so a reconstructed cast spectrum could not be synced from
+    position anyway without a per-path delay nobody can measure in production."""
+    if _spectrum is None or m.get("source") != "local":
+        return None
+    bands, active = _spectrum.read()
+    return bands if active else None
+
+
 def _frame_publish():
     global _track_id, _track_key
     if _frame is None:
@@ -233,8 +282,9 @@ def _frame_publish():
     with _lock:
         m = _merged_locked()
     art = _art_now
+    flags = npframe.FLAG_SPECTRUM if _spectrum is not None else 0
     if m is None:
-        _frame.publish()                         # a complete IDLE frame
+        _frame.publish(flags=flags)                  # a complete IDLE frame
         return
     key = (m["title"], m["artist"], m["album"])
     if key != _track_key:
@@ -245,7 +295,8 @@ def _frame_publish():
                    position=_live_position(m), length=m.get("length", 0.0),
                    rate=1.0, caps=m.get("caps", 0), track_id=_track_id,
                    title=m["title"], artist=m["artist"], album=m["album"],
-                   device=m.get("device", ""), art=art)
+                   device=m.get("device", ""), art=art,
+                   bands=_bands_for(m), flags=flags)
 
 
 def frame_loop(hz):
@@ -684,6 +735,11 @@ def _cleanup(*_):
             os.unlink(CTL_FILE)
     except OSError:
         pass
+    if _spectrum is not None:
+        try:
+            _spectrum.close()
+        except Exception:
+            pass
     if _proc and _proc.poll() is None:
         try:
             _proc.terminate()
@@ -874,7 +930,7 @@ def cmd_shm_info(argv):
 
 # ---- main -----------------------------------------------------------------
 def run_daemon():
-    global PLAYERS, _frame
+    global PLAYERS, _frame, _spectrum
     cfg = load_config()
     PLAYERS = cfg["players"]
     signal.signal(signal.SIGINT, _on_signal)
@@ -888,6 +944,16 @@ def run_daemon():
     except OSError:
         pass
     _frame = npframe.Writer()                    # publishes an idle frame
+    if cfg["spectrum"] == "on":
+        # Degrade the way the cast fallback does: say so and carry on without
+        # it. numpy lives in the venv, so an interpreter without it loses the
+        # spectrum, not the daemon.
+        try:
+            import npspectrum
+            _spectrum = npspectrum.Spectrum(cfg)
+        except Exception as e:
+            sys.stderr.write("now-playing: spectrum disabled (%s)\n" % e)
+            _spectrum = None
     publish()                                    # initial idle
     threading.Thread(target=mpris_loop, daemon=True).start()
     threading.Thread(target=ctl_loop, daemon=True).start()

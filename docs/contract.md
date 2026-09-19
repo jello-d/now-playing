@@ -207,12 +207,11 @@ months later.
 Every key may be overridden by an environment variable of the same name for
 one-off testing. `NP_PLAYERS` keeps working as the override for `players`.
 
-LIVE KEYS TODAY are `players` and `publish_hz`. The spectrum keys below are
-the planned set and are NOT yet accepted: the analyser has not moved into the
-daemon, so configuring one is currently an unknown-key error. That is
-deliberate rather than an oversight. Accepting a key that does nothing is the
-silent no-op this format exists to refuse, and the error goes away in the same
-change that makes the key mean something.
+EVERY KEY BELOW IS LIVE. The spectrum keys were previously refused as unknown,
+because the analyser still lived in the renderer and accepting an inert key is
+the silent no-op this format exists to prevent. The analyser now runs in the
+daemon, so they took effect in the same change that made them mean something.
+An out-of-range value is refused at startup with the reason, not clamped.
 
     key            default                       meaning
     players        YoutubeMusic,chrome,chromium  playerctl player list
@@ -229,6 +228,13 @@ change that makes the key mean something.
     attack         0.65                          rise smoothing per hop
     decay          0.16                          fall smoothing per hop
     active_rms     4e-4                          RMS above this = audio live
+
+`spectrum = on` publishes `bands` for LOCAL playback only. While a cast is the
+source the daemon publishes `band_count = 0`, because a Chromecast decodes on
+the device and there is no local PCM to analyse. The sink monitor would still
+carry whatever this box happens to be playing, and publishing that against a
+cast track would describe audio the listener is not hearing. A consumer needs
+no special case: `band_count = 0` already means "no spectrum available".
 
 Every key above describes the SIGNAL, so it lives with the producer. How the
 signal LOOKS (cap physics, dot size, colours, opacity, scrim, outline) is

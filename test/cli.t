@@ -78,10 +78,33 @@ run bogus-verb >/dev/null 2>&1 && fail "took an unknown verb" || :
 
 # Config: an unknown key and a malformed line are LOUD, and the message names
 # the offending key so it is actionable.
-printf 'players=a,b\nspectrum=on\n' > "$T/cfg/now-playing/config"
+printf 'players=a,b\nbogus_key=1\n' > "$T/cfg/now-playing/config"
 out=$(timeout 5 env XDG_RUNTIME_DIR="$T" XDG_CONFIG_HOME="$T/cfg" \
   python3 "$NP" 2>&1) && fail "daemon started with an unknown config key"
-echo "$out" | grep -q "unknown key 'spectrum'" || fail "bad message: $out"
+echo "$out" | grep -q "unknown key 'bogus_key'" || fail "bad message: $out"
+
+# The spectrum keys are LIVE now that the analyser is daemon-side, so they must
+# NOT read as unknown -- that was the deliberate refusal before the move, and a
+# stale refusal would be just as wrong as a silent accept.
+printf 'spectrum=off\nbands=24\ntilt=3.5\n' > "$T/cfg/now-playing/config"
+out=$(timeout 3 env XDG_RUNTIME_DIR="$T" XDG_CONFIG_HOME="$T/cfg" \
+  python3 "$NP" 2>&1 || :)
+echo "$out" | grep -q "unknown key" && fail "spectrum keys still refused: $out" || :
+
+# ...but an out-of-range DSP value is refused LOUDLY and names the key. Clamping
+# would silently redefine what was asked for.
+cfg_fails() {   # <config line> <expected message fragment>
+  printf '%s\n' "$1" > "$T/cfg/now-playing/config"
+  out=$(timeout 5 env XDG_RUNTIME_DIR="$T" XDG_CONFIG_HOME="$T/cfg" \
+    python3 "$NP" 2>&1) && fail "accepted bad config: $1"
+  echo "$out" | grep -q "$2" || fail "bad message for '$1': $out"
+}
+cfg_fails 'spectrum=maybe' "must be 'on' or 'off'"
+cfg_fails 'bands=999'      'bands must be 1\.\.64'
+cfg_fails 'fft=1000'       'power of two'
+cfg_fails 'fmin=900
+fmax=400'                  'fmin < fmax'
+cfg_fails 'attack=0'       'attack must be in'
 
 printf 'players\n' > "$T/cfg/now-playing/config"
 out=$(timeout 5 env XDG_RUNTIME_DIR="$T" XDG_CONFIG_HOME="$T/cfg" \
