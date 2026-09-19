@@ -47,6 +47,7 @@ CTL_FILE   = os.path.join(RUN, "now-playing.ctl")
 POLL_SECS  = 1.5                     # local position re-sample / re-publish
 CAST_SECS  = 2.0                     # cast reconcile / status-refresh cadence
 REDISC_SECS = 300.0                  # idle mDNS rediscovery (anti-stale)
+NOTCAST_TTL = 60.0                   # how long a "native app" probe is trusted
 MEDIA_NS   = "urn:x-cast:com.google.cast.media"
 
 # ---- configuration --------------------------------------------------------
@@ -442,15 +443,56 @@ def _read_media(ms, name):
             "length": ms.duration or 0.0,
             "mono": time.monotonic(), "caps": _cast_caps(ms)}
 
-def _is_cast_media(cast_status):
-    """True iff the RECEIVER status shows a real Cast media receiver already
-    running -- a valid 8-hex Cast Application ID with the media namespace. A
-    native app reports app_id 'AndroidNativeApp' (fails the hex test), so we
-    never engage the media controller on it. Read from the passive receiver
-    broadcast; no media controller touched."""
+CAST_MEDIA, CAST_NATIVE, CAST_PENDING = "media", "native", "pending"
+
+
+def _classify_cast(cast_status):
+    """THREE-way, because "not a media receiver" and "not a media receiver YET"
+    must never be treated alike.
+
+    A receiver publishes its namespaces ASYNCHRONOUSLY after launch, so a probe
+    landing inside that window sees a perfectly valid 8-hex app id with no media
+    namespace yet. The old two-way answer called that a refusal, the caller
+    blacklisted the device on it, and the daemon then went blind to a LIVE cast
+    for the rest of that app's session. Measured on manifold 2026-09-18: a
+    casting device the gate would have accepted was reported idle for days, and
+    a restart picked it up in 4 seconds.
+
+      media   -- a real Cast media receiver is running; safe to drive.
+      native  -- a genuine native app (app_id 'AndroidNativeApp' fails the hex
+                 test). NEVER drive this; it is someone's TV.
+      pending -- nothing running, or a receiver still coming up. Inconclusive,
+                 so the caller must RETRY rather than remember it.
+
+    Read from the passive receiver broadcast; no media controller touched."""
     aid = cast_status.app_id or ""
-    return (bool(re.fullmatch(r"[0-9A-Fa-f]{8}", aid))
-            and MEDIA_NS in (cast_status.namespaces or []))
+    if not aid:
+        return CAST_PENDING
+    if not re.fullmatch(r"[0-9A-Fa-f]{8}", aid):
+        return CAST_NATIVE
+    if MEDIA_NS not in (cast_status.namespaces or []):
+        return CAST_PENDING
+    return CAST_MEDIA
+
+
+def _is_cast_media(cast_status):
+    """True iff a real Cast media receiver is ALREADY running. The strict
+    reading, used for the liveness re-check on a connection we already hold."""
+    return _classify_cast(cast_status) == CAST_MEDIA
+
+
+def _notcast_entry(kind, rs, now):
+    """The blacklist POLICY, kept out of cast_main's closure so it can be
+    tested. Returns the entry to remember, or None to remember nothing.
+
+    Both halves are the fix: only a CONFIRMED native app is remembered at all,
+    and even that expires. The defect was a caller that remembered every
+    non-media answer, forever -- so a probe that merely arrived early, before a
+    launching receiver had published its namespaces, blacklisted a device that
+    was about to start casting and never reconsidered."""
+    if kind != CAST_NATIVE:
+        return None
+    return (rs, now + NOTCAST_TTL)
 
 def cast_main():
     global _zc, _browser, _cast, _cast_conn, _cast_uuid
@@ -462,7 +504,11 @@ def cast_main():
         sys.stderr.write("now-playing: cast fallback disabled (%s)\n" % e)
         return
 
-    notcast = {}                     # uuid -> rs already probed as NOT cast
+    # uuid -> (rs, deadline): probed and found to be a genuine NATIVE app. The
+    # deadline is the load-bearing part. An unbounded entry turns ONE bad probe
+    # into permanent blindness, and only a CONFIRMED native app earns one at all
+    # (see _classify_cast); a still-launching receiver is retried instead.
+    notcast = {}
     def add(uuid, service):
         with _seen_lock:
             _seen[uuid] = service
@@ -493,6 +539,12 @@ def cast_main():
             pass
         with _seen_lock:
             _seen.clear()
+        # The blacklist dies WITH the browser that built it. Leaving it behind
+        # is what let a stale refusal outlive every rediscovery cycle: _seen was
+        # rebuilt from scratch each time while notcast silently persisted, so
+        # the periodic refresh that exists to recover from staleness could never
+        # actually recover from this one.
+        notcast.clear()
 
     start_browser()
     disc_at = time.time()
@@ -580,7 +632,8 @@ def cast_main():
             if txt.get("st") != "1":              # only an app-running device
                 continue
             rs = txt.get("rs", "")
-            if notcast.get(uuid) == rs:           # already probed: skip
+            hit = notcast.get(uuid)               # probed native, still fresh?
+            if hit and hit[0] == rs and time.monotonic() < hit[1]:
                 continue
             info = _browser.devices.get(uuid)
             if not info:
@@ -591,8 +644,11 @@ def cast_main():
             except Exception:
                 continue
             # READ-ONLY gate: is a real Cast media receiver already running?
-            if not _is_cast_media(cast.status):
-                notcast[uuid] = rs                # remember (per running app)
+            kind = _classify_cast(cast.status)
+            if kind != CAST_MEDIA:
+                entry = _notcast_entry(kind, rs, time.monotonic())
+                if entry is not None:
+                    notcast[uuid] = entry
                 try:
                     cast.disconnect()             # native app / idle
                 except Exception:

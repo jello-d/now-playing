@@ -66,6 +66,45 @@ assert not (caps & F.CAP_PREV), "prev set with no backward support"
 assert not (caps & F.CAP_SEEK), "seek set with no seek support"
 assert d._cast_caps(MS()) == 0, "absent flags must read as absent, not present"
 
+# CAST CLASSIFICATION is THREE-way. The whole point is that "not a media
+# receiver" and "not a media receiver YET" are different answers: a receiver
+# publishes its namespaces asynchronously after launch, so a probe landing in
+# that window sees a valid app id and no media namespace. Calling that a
+# refusal is what let one early probe blind the daemon to a LIVE cast for a
+# whole session (measured on manifold 2026-09-18).
+class CS:
+    def __init__(self, app_id=None, namespaces=None):
+        self.app_id = app_id; self.namespaces = namespaces or []
+MEDIA = d.MEDIA_NS
+assert d._classify_cast(CS("CC1AD845", [MEDIA])) == d.CAST_MEDIA
+assert d._classify_cast(CS("2DB7CC49", [MEDIA])) == d.CAST_MEDIA
+# a genuine native app: never drive it, and it IS cacheable
+assert d._classify_cast(CS("AndroidNativeApp", [MEDIA])) == d.CAST_NATIVE
+# still launching: a valid id, namespaces not published yet -> RETRY, not a
+# refusal. This is the case the old two-way gate got wrong.
+assert d._classify_cast(CS("CC1AD845", [])) == d.CAST_PENDING
+assert d._classify_cast(CS("CC1AD845", ["urn:x-cast:com.google.cast.tp"])) \
+    == d.CAST_PENDING
+# nothing running at all is also inconclusive, never a refusal
+assert d._classify_cast(CS(None, [])) == d.CAST_PENDING
+assert d._classify_cast(CS("", [MEDIA])) == d.CAST_PENDING
+# the strict boolean still means exactly what its callers think it means
+assert d._is_cast_media(CS("CC1AD845", [MEDIA])) is True
+assert d._is_cast_media(CS("CC1AD845", [])) is False
+assert d._is_cast_media(CS("AndroidNativeApp", [MEDIA])) is False
+# and the negative cache must be BOUNDED, or one bad probe is forever
+assert d.NOTCAST_TTL > 0, "negative probe cache must expire"
+
+# THE BLACKLIST POLICY is the half that actually broke. Classifying correctly
+# is useless if the caller still remembers an inconclusive answer.
+assert d._notcast_entry(d.CAST_PENDING, "YouTube Music", 100.0) is None, \
+    "a still-launching receiver must NOT be blacklisted (this was the bug)"
+assert d._notcast_entry(d.CAST_MEDIA, "YouTube Music", 100.0) is None, \
+    "a live media receiver must never be blacklisted"
+e = d._notcast_entry(d.CAST_NATIVE, "HBO Max", 100.0)
+assert e is not None and e[0] == "HBO Max", e
+assert e[1] == 100.0 + d.NOTCAST_TTL, "native entry must carry a DEADLINE"
+
 # TRACK ID bumps on a track change and holds otherwise -- it is what a view
 # uses to restart a marquee, so a spurious bump is a visible glitch.
 d._frame = F.Writer()
