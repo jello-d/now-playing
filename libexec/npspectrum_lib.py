@@ -36,9 +36,9 @@ MONITOR_POLL = 2.0              # how often to notice the default sink moving
 
 def default_monitor():
     """The default sink's monitor source, or "" when it cannot be resolved.
-  Resolved by NAME each time rather than cached, so a sink switch is picked
-  up; @DEFAULT_MONITOR@ is not used because we need to SEE the change to
-  know a reopen is due."""
+    Resolved by NAME each time rather than cached, so a sink switch is picked
+    up; @DEFAULT_MONITOR@ is not used because we need to SEE the change to
+    know a reopen is due."""
     try:
         out = subprocess.run(["pactl", "get-default-sink"],
                              capture_output=True, text=True, timeout=2)
@@ -51,8 +51,8 @@ def default_monitor():
 class Spectrum:
     """One capture thread publishing smoothed band levels 0..1.
 
-  read() is the only thing the daemon touches, and it never blocks on the
-  capture: the worker owns the PCM and hands over a copy under a lock."""
+    read() is the only thing the daemon touches, and it never blocks on the
+    capture: the worker owns the PCM and hands over a copy under a lock."""
 
     def __init__(self, cfg):
         self.bands_n = max(1, min(int(cfg["bands"]), 64))
@@ -75,9 +75,9 @@ class Spectrum:
 
     def _build_bands(self):
         """Log-spaced edges plus a per-band dB tilt, mirroring spectrum.hpp.
-    The tilt lifts highs and trims lows about the geometric-mean pivot;
-    without it music's bass-heavy energy pins the low bands and the highs
-    never move."""
+        The tilt lifts highs and trims lows about the geometric-mean pivot;
+        without it music's bass-heavy energy pins the low bands and the highs
+        never move."""
         half = self.fft // 2
         nyq = self.rate / 2.0
         pivot = (self.fmin * self.fmax) ** 0.5
@@ -97,14 +97,15 @@ class Spectrum:
 
     def read(self):
         """The current band levels, as a COPY so the caller can publish without
-    holding the capture lock across a frame write.
+        holding the capture lock across a frame write.
 
-    There is deliberately NO "is audio live" flag. spectrum.hpp computed one
-    (active_rms) and the card DISCARDED it, so it never had a consumer; adding
-    one here would have made silence blank the bands, and a blanked band array
-    reads as "no spectrum" to a consumer, which hands rendering back to its own
-    fallback DSP mid-track. Silence is already expressed correctly by the decay
-    smoothing walking the levels to zero."""
+        There is deliberately NO "is audio live" flag. spectrum.hpp
+        computed one (active_rms) and the card DISCARDED it, so it never
+        had a consumer; adding one here would have made silence blank the
+        bands, and a blanked band array reads as "no spectrum" to a
+        consumer, which hands rendering back to its own fallback DSP
+        mid-track. Silence is already expressed correctly by the decay
+        smoothing walking the levels to zero."""
         with self._lock:
             return self._bands.tolist()
 
@@ -139,7 +140,7 @@ class Spectrum:
 
     def _capture_loop(self):
         """Record until the default sink moves or the read fails, then reopen.
-    Bands are zeroed between streams so a stale picture never lingers."""
+        Bands are zeroed between streams so a stale picture never lingers."""
         while not self._stop.is_set():
             src = default_monitor()
             if not src:

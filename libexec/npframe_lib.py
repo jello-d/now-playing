@@ -88,15 +88,15 @@ class FrameVersionError(Exception):
 
 def frame_path():
     """The one well-known path. Fixed, so no consumer needs discovery to
-  FIND it; `shm-info` exists to negotiate the VERSION, not the location."""
+    FIND it; `shm-info` exists to negotiate the VERSION, not the location."""
     run = os.environ.get("XDG_RUNTIME_DIR") or "/tmp"
     return os.path.join(run, "now-playing.frame")
 
 
 def _fixed(s, n):
     """`s` as exactly n bytes, NUL-terminated, truncated at a codepoint
-  boundary (decode-ignore drops a sequence split by the cut, so a slot can
-  never hold half a character)."""
+    boundary (decode-ignore drops a sequence split by the cut, so a slot can
+    never hold half a character)."""
     b = (s or "").encode("utf-8", "replace")[: n - 1]
     b = b.decode("utf-8", "ignore").encode("utf-8")
     return b + b"\0" * (n - len(b))
@@ -116,9 +116,9 @@ def caps_names(caps):
 
 def peek_header(path=None):
     """(magic, version, frame_bytes) straight off the page, WITHOUT the
-  seqlock. Legitimate only because the header is constant for the life of a
-  publisher; never read payload this way. This is how `shm-info` reports a
-  version it deliberately cannot parse."""
+    seqlock. Legitimate only because the header is constant for the life of a
+    publisher; never read payload this way. This is how `shm-info` reports a
+    version it deliberately cannot parse."""
     p = path or frame_path()
     with open(p, "rb") as f:
         head = f.read(12)
@@ -241,10 +241,10 @@ class Reader:
     def read(self, attempts=8):
         """A coherent frame as a dict, or None if one could not be taken.
 
-    The attempt bound matters: a daemon killed between the two counter
-    stores leaves the counter ODD for good, and an unbounded reader would
-    spin on it forever. Exhausting attempts means "unavailable", which the
-    caller treats exactly like a stale frame."""
+        The attempt bound matters: a daemon killed between the two counter
+        stores leaves the counter ODD for good, and an unbounded reader would
+        spin on it forever. Exhausting attempts means "unavailable", which the
+        caller treats exactly like a stale frame."""
         mm = self._mm
         for _ in range(attempts):
             s1 = struct.unpack_from("<I", mm, O_SEQ)[0]
@@ -297,7 +297,7 @@ class Reader:
 
 def age_secs(frame):
     """Seconds since the frame was published. Both ends read CLOCK_MONOTONIC,
-  which is system-wide on Linux, so this compares across processes."""
+    which is system-wide on Linux, so this compares across processes."""
     if not frame:
         return float("inf")
     return max(0.0, (time.monotonic_ns() - frame["heartbeat_ns"]) / 1e9)

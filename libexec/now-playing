@@ -75,69 +75,69 @@ PLAYERS = CONFIG_DEFAULTS["players"]     # set from config before threads start
 
 
 def _die(msg):
-  sys.stderr.write("now-playing: %s\n" % msg)
-  raise SystemExit(2)
+    sys.stderr.write("now-playing: %s\n" % msg)
+    raise SystemExit(2)
 
 
 def config_path():
-  base = (os.environ.get("XDG_CONFIG_HOME")
-          or os.path.join(os.path.expanduser("~"), ".config"))
-  return os.path.join(base, "now-playing", "config")
+    base = (os.environ.get("XDG_CONFIG_HOME")
+            or os.path.join(os.path.expanduser("~"), ".config"))
+    return os.path.join(base, "now-playing", "config")
 
 
 def load_config():
-  cfg = dict(CONFIG_DEFAULTS)
-  path = config_path()
-  try:
-    with open(path) as f:
-      lines = f.readlines()
-  except FileNotFoundError:
-    lines = []
-  except OSError as e:
-    _die("cannot read %s (%s)" % (path, e))
-  for n, line in enumerate(lines, 1):
-    s = line.split("#", 1)[0].strip()
-    if not s:
-      continue
-    if "=" not in s:
-      _die("%s:%d: not KEY=VALUE: %s" % (path, n, s))
-    k, v = (x.strip() for x in s.split("=", 1))
-    if k not in CONFIG_KEYS:
-      _die("%s:%d: unknown key '%s' (known: %s)"
-           % (path, n, k, ", ".join(sorted(CONFIG_KEYS))))
-    cfg[k] = v
-  for k in CONFIG_KEYS:                       # env wins, for one-off testing
-    env = os.environ.get("NP_" + k.upper())
-    if env is not None:
-      cfg[k] = env
-  for k, cast in CONFIG_KEYS.items():
+    cfg = dict(CONFIG_DEFAULTS)
+    path = config_path()
     try:
-      cfg[k] = cast(cfg[k])
-    except (TypeError, ValueError):
-      _die("bad value for '%s': %r" % (k, cfg[k]))
-  if cfg["publish_hz"] <= 0:
-    _die("publish_hz must be positive (got %r)" % cfg["publish_hz"])
-  # Validate the DSP the same way: a value that cannot work should say so at
-  # startup, not produce a silently wrong picture for months.
-  if cfg["spectrum"] not in ("on", "off"):
-    _die("spectrum must be 'on' or 'off' (got %r)" % cfg["spectrum"])
-  if not 1 <= cfg["bands"] <= npframe.MAX_BANDS:
-    _die("bands must be 1..%d (got %r)" % (npframe.MAX_BANDS,
-                                           cfg["bands"]))
-  if cfg["fft"] < 64 or (cfg["fft"] & (cfg["fft"] - 1)):
-    _die("fft must be a power of two >= 64 (got %r)" % cfg["fft"])
-  if not 0 < cfg["fmin"] < cfg["fmax"]:
-    _die("need 0 < fmin < fmax (got %r, %r)" % (cfg["fmin"], cfg["fmax"]))
-  if cfg["fmax"] > cfg["rate"] / 2:
-    _die("fmax %r is above the Nyquist limit for rate %r"
-         % (cfg["fmax"], cfg["rate"]))
-  for k in ("attack", "decay"):
-    if not 0 < cfg[k] <= 1:
-      _die("%s must be in (0, 1] (got %r)" % (k, cfg[k]))
-  return cfg
+        with open(path) as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        lines = []
+    except OSError as e:
+        _die("cannot read %s (%s)" % (path, e))
+    for n, line in enumerate(lines, 1):
+        s = line.split("#", 1)[0].strip()
+        if not s:
+            continue
+        if "=" not in s:
+            _die("%s:%d: not KEY=VALUE: %s" % (path, n, s))
+        k, v = (x.strip() for x in s.split("=", 1))
+        if k not in CONFIG_KEYS:
+            _die("%s:%d: unknown key '%s' (known: %s)"
+                 % (path, n, k, ", ".join(sorted(CONFIG_KEYS))))
+        cfg[k] = v
+    for k in CONFIG_KEYS:                       # env wins, for one-off testing
+        env = os.environ.get("NP_" + k.upper())
+        if env is not None:
+            cfg[k] = env
+    for k, cast in CONFIG_KEYS.items():
+        try:
+            cfg[k] = cast(cfg[k])
+        except (TypeError, ValueError):
+            _die("bad value for '%s': %r" % (k, cfg[k]))
+    if cfg["publish_hz"] <= 0:
+        _die("publish_hz must be positive (got %r)" % cfg["publish_hz"])
+    # Validate the DSP the same way: a value that cannot work should say so at
+    # startup, not produce a silently wrong picture for months.
+    if cfg["spectrum"] not in ("on", "off"):
+        _die("spectrum must be 'on' or 'off' (got %r)" % cfg["spectrum"])
+    if not 1 <= cfg["bands"] <= npframe.MAX_BANDS:
+        _die("bands must be 1..%d (got %r)" % (npframe.MAX_BANDS,
+                                               cfg["bands"]))
+    if cfg["fft"] < 64 or (cfg["fft"] & (cfg["fft"] - 1)):
+        _die("fft must be a power of two >= 64 (got %r)" % cfg["fft"])
+    if not 0 < cfg["fmin"] < cfg["fmax"]:
+        _die("need 0 < fmin < fmax (got %r, %r)" % (cfg["fmin"], cfg["fmax"]))
+    if cfg["fmax"] > cfg["rate"] / 2:
+        _die("fmax %r is above the Nyquist limit for rate %r"
+             % (cfg["fmax"], cfg["rate"]))
+    for k in ("attack", "decay"):
+        if not 0 < cfg[k] <= 1:
+            _die("%s must be in (0, 1] (got %r)" % (k, cfg[k]))
+    return cfg
 
 for n in ("pychromecast", "zeroconf"):
-  logging.getLogger(n).setLevel(logging.ERROR)
+    logging.getLogger(n).setLevel(logging.ERROR)
 
 _lock      = threading.Lock()
 _local     = None                    # local MPRIS dict or None
@@ -159,8 +159,9 @@ _art_lock  = threading.Lock()
 
 _frame     = None                    # npframe.Writer (the published contract)
 _spectrum  = None                    # npspectrum.Spectrum, or None when off
-_art_now   = ""                      # RESOLVED art path, published by publish()
-                                     # so the 30Hz frame loop never does I/O
+_art_now   = ""                      # RESOLVED art path, published by
+                                     # publish(), so the 30Hz frame loop
+                                     # never does I/O
 _track_id  = 0                       # bumped on every track change
 _track_key = None
 
@@ -177,643 +178,648 @@ LOCAL_CAPS = npframe.CAP_PAUSE | npframe.CAP_NEXT | npframe.CAP_PREV
 
 # ---- cover art ------------------------------------------------------------
 def fetch_art(url):
-  """Local file path for `url`, or "". file:// used in place; http(s) fetched
-  once to a per-url cache file (unique name so it reloads). Never raises."""
-  if not url:
-    return ""
-  if url.startswith("file://"):
-    return urllib.parse.unquote(urllib.parse.urlparse(url).path)
-  with _art_lock:
-    p = _art_cache.get(url)
-  if p and os.path.exists(p):
-    return p
-  try:
-    h = hashlib.sha1(url.encode("utf-8", "replace")).hexdigest()[:16]
-    dst = os.path.join(RUN, "np-art-" + h)
-    if not os.path.exists(dst):
-      tmp = dst + ".tmp"
-      req = urllib.request.Request(
-          url, headers={"User-Agent": "waybar-np"})
-      with urllib.request.urlopen(req, timeout=4) as r, \
-           open(tmp, "wb") as f:
-        shutil.copyfileobj(r, f)
-      os.replace(tmp, dst)
+    """Local file path for `url`, or "". file:// used in place; http(s) fetched
+    once to a per-url cache file (unique name so it reloads). Never raises."""
+    if not url:
+        return ""
+    if url.startswith("file://"):
+        return urllib.parse.unquote(urllib.parse.urlparse(url).path)
     with _art_lock:
-      _art_cache[url] = dst
-    return dst
-  except Exception as e:
-    sys.stderr.write("now-playing: art fetch failed (%s)\n" % e)
-    return ""
+        p = _art_cache.get(url)
+    if p and os.path.exists(p):
+        return p
+    try:
+        h = hashlib.sha1(url.encode("utf-8", "replace")).hexdigest()[:16]
+        dst = os.path.join(RUN, "np-art-" + h)
+        if not os.path.exists(dst):
+            tmp = dst + ".tmp"
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "waybar-np"})
+            with urllib.request.urlopen(req, timeout=4) as r, \
+                 open(tmp, "wb") as f:
+                shutil.copyfileobj(r, f)
+            os.replace(tmp, dst)
+        with _art_lock:
+            _art_cache[url] = dst
+        return dst
+    except Exception as e:
+        sys.stderr.write("now-playing: art fetch failed (%s)\n" % e)
+        return ""
 
 
 # ---- state publishing -----------------------------------------------------
 def _fields(s):
-  return {"status": s["status"], "title": s["title"], "artist": s["artist"],
-          "album": s["album"], "art": s.get("art", ""),
-          "position": s.get("position", 0.0), "length": s.get("length", 0.0),
-          # `caps` is what the LIVE source can actually do; `mono` stamps
-          # the last REAL position sample so the daemon (never a consumer)
-          # can extrapolate from it.
-          "caps": s.get("caps", 0), "mono": s.get("mono", 0.0)}
+    return {"status": s["status"], "title": s["title"], "artist": s["artist"],
+            "album": s["album"], "art": s.get("art", ""),
+            "position": s.get("position", 0.0), "length": s.get("length", 0.0),
+            # `caps` is what the LIVE source can actually do; `mono` stamps
+            # the last REAL position sample so the daemon (never a consumer)
+            # can extrapolate from it.
+            "caps": s.get("caps", 0), "mono": s.get("mono", 0.0)}
 
 def _merged_locked():
-  """Local wins whenever it has a track; the cast fallback fills the gap."""
-  if _local and _local["title"] and _local["status"] in ("playing", "paused"):
-    return dict(source="local", device="", **_fields(_local))
-  if _cast and _cast["title"] and _cast["status"] in ("playing", "paused"):
-    return dict(source="cast", device=_cast.get("device", ""),
-                **_fields(_cast))
-  return None
+    """Local wins whenever it has a track; the cast fallback fills the gap."""
+    if _local and _local["title"] and _local["status"] in ("playing", "paused"):
+        return dict(source="local", device="", **_fields(_local))
+    if _cast and _cast["title"] and _cast["status"] in ("playing", "paused"):
+        return dict(source="cast", device=_cast.get("device", ""),
+                    **_fields(_cast))
+    return None
 
 def publish():
-  """Resolve the artwork, then publish. Called on metadata change and on the
-  slow poll, NEVER at frame rate: fetch_art can do network I/O, which must
-  stay off the publishing path."""
-  global _art_now
-  with _lock:
-    m = _merged_locked()
-  if m is None:
-    _art_now = ""
+    """Resolve the artwork, then publish. Called on metadata change and on the
+    slow poll, NEVER at frame rate: fetch_art can do network I/O, which must
+    stay off the publishing path."""
+    global _art_now
+    with _lock:
+        m = _merged_locked()
+    if m is None:
+        _art_now = ""
+        _frame_publish()
+        return
+    m["art"] = fetch_art(m.get("art", ""))     # resolve URL -> path
+    _art_now = m["art"]
     _frame_publish()
-    return
-  m["art"] = fetch_art(m.get("art", ""))     # resolve URL -> path
-  _art_now = m["art"]
-  _frame_publish()
 
 
 # ---- the shared-memory frame ----------------------------------------------
 def _live_position(m):
-  """Position extrapolated from the last REAL sample. This is the one place
-  it happens: the daemon knows about seeks, rate and source switches, and a
-  consumer knows none of them, so a consumer is never asked to guess."""
-  p = m.get("position", 0.0)
-  if m.get("status") == "playing":
-    mono = m.get("mono", 0.0)
-    if mono > 0:
-      p += max(0.0, time.monotonic() - mono)
-  ln = m.get("length", 0.0)
-  if ln > 0 and p > ln:
-    p = ln
-  return p if p > 0 else 0.0
+    """Position extrapolated from the last REAL sample. This is the one place
+    it happens: the daemon knows about seeks, rate and source switches, and a
+    consumer knows none of them, so a consumer is never asked to guess."""
+    p = m.get("position", 0.0)
+    if m.get("status") == "playing":
+        mono = m.get("mono", 0.0)
+        if mono > 0:
+            p += max(0.0, time.monotonic() - mono)
+    ln = m.get("length", 0.0)
+    if ln > 0 and p > ln:
+        p = ln
+    return p if p > 0 else 0.0
 
 
 def _bands_for(m):
-  """Bands for THIS source, or None.
+    """Bands for THIS source, or None.
 
-  A cast decodes on the device, so there is no local PCM and the honest
-  answer is NO BANDS (band_count 0, which the contract already defines as "no
-  spectrum available"). The sink monitor would still be carrying whatever
-  this box happens to be playing, and publishing that against a cast track
-  would be a confident lie -- the analyser would be describing audio the
-  listener is not hearing. Measured 2026-09-18: the published position leads
-  the actual acoustic output by +1.7 s (YouTube Music) to +8.0 s (Default
-  Media Receiver), so a reconstructed cast spectrum could not be synced from
-  position anyway without a per-path delay nobody can measure in
-  production."""
-  if _spectrum is None or m.get("source") != "local":
-    return None
-  return _spectrum.read()
+    A cast decodes on the device, so there is no local PCM and the honest
+    answer is NO BANDS (band_count 0, which the contract already defines as "no
+    spectrum available"). The sink monitor would still be carrying whatever
+    this box happens to be playing, and publishing that against a cast track
+    would be a confident lie -- the analyser would be describing audio the
+    listener is not hearing. Measured 2026-09-18: the published position leads
+    the actual acoustic output by +1.7 s (YouTube Music) to +8.0 s (Default
+    Media Receiver), so a reconstructed cast spectrum could not be synced from
+    position anyway without a per-path delay nobody can measure in
+    production."""
+    if _spectrum is None or m.get("source") != "local":
+        return None
+    return _spectrum.read()
 
 
 def _frame_publish():
-  global _track_id, _track_key
-  if _frame is None:
-    return
-  with _lock:
-    m = _merged_locked()
-  art = _art_now
-  flags = npframe.FLAG_SPECTRUM if _spectrum is not None else 0
-  if m is None:
-    _frame.publish(flags=flags)                  # a complete IDLE frame
-    return
-  key = (m["title"], m["artist"], m["album"])
-  if key != _track_key:
-    _track_key = key
-    _track_id += 1
-  _frame.publish(status=npframe.STATUS_CODE.get(m["status"], 0),
-                 source=npframe.SOURCE_CODE.get(m["source"], 0),
-                 position=_live_position(m), length=m.get("length", 0.0),
-                 rate=1.0, caps=m.get("caps", 0), track_id=_track_id,
-                 title=m["title"], artist=m["artist"], album=m["album"],
-                 device=m.get("device", ""), art=art,
-                 bands=_bands_for(m), flags=flags)
+    global _track_id, _track_key
+    if _frame is None:
+        return
+    with _lock:
+        m = _merged_locked()
+    art = _art_now
+    flags = npframe.FLAG_SPECTRUM if _spectrum is not None else 0
+    if m is None:
+        _frame.publish(flags=flags)                  # a complete IDLE frame
+        return
+    key = (m["title"], m["artist"], m["album"])
+    if key != _track_key:
+        _track_key = key
+        _track_id += 1
+    _frame.publish(status=npframe.STATUS_CODE.get(m["status"], 0),
+                   source=npframe.SOURCE_CODE.get(m["source"], 0),
+                   position=_live_position(m), length=m.get("length", 0.0),
+                   rate=1.0, caps=m.get("caps", 0), track_id=_track_id,
+                   title=m["title"], artist=m["artist"], album=m["album"],
+                   device=m.get("device", ""), art=art,
+                   bands=_bands_for(m), flags=flags)
 
 
 def frame_loop(hz):
-  interval = 1.0 / hz
-  while not _shutdown.wait(interval):
-    _frame_publish()
+    interval = 1.0 / hz
+    while not _shutdown.wait(interval):
+        _frame_publish()
 
 
 # ---- local position sampling ----------------------------------------------
 def _playerctl_position():
-  try:
-    out = subprocess.run(["playerctl", "--player=" + PLAYERS, "position"],
-                         capture_output=True, text=True, timeout=1)
-    return float((out.stdout or "").strip() or 0)
-  except Exception:
-    return 0.0
+    try:
+        out = subprocess.run(["playerctl", "--player=" + PLAYERS, "position"],
+                             capture_output=True, text=True, timeout=1)
+        return float((out.stdout or "").strip() or 0)
+    except Exception:
+        return 0.0
 
 def sample_positions():
-  with _lock:
-    have_local = _local is not None and _local.get("title")
-  if have_local:
-    pos = _playerctl_position()
-    mono = time.monotonic()
     with _lock:
-      if _local is not None:
-        _local["position"] = pos
-        _local["mono"] = mono      # the anchor _live_position runs from
+        have_local = _local is not None and _local.get("title")
+    if have_local:
+        pos = _playerctl_position()
+        mono = time.monotonic()
+        with _lock:
+            if _local is not None:
+                _local["position"] = pos
+                _local["mono"] = mono      # the anchor _live_position runs from
 
 def position_loop():
-  while not _shutdown.wait(POLL_SECS):
-    sample_positions()
-    publish()
+    while not _shutdown.wait(POLL_SECS):
+        sample_positions()
+        publish()
 
 
 # ---- transport control ----------------------------------------------------
 def _do_command(cmd):
-  # While a cast is the live source, drive its media controller (a direct
-  # playerctl cannot reach it -- local MPRIS is a stub then). Else playerctl.
-  with _lock:
-    cast_live = _cast is not None and _cast.get("title")
-    cast_status = _cast.get("status") if cast_live else None
-  conn = _cast_conn
-  if cast_live and conn is not None:
-    try:
-      mc = conn.media_controller
-      if cmd == "playpause":
-        (mc.pause if cast_status == "playing" else mc.play)()
-      elif cmd == "next":
-        mc.skip()
-      elif cmd == "previous":
-        mc.queue_prev()          # best effort; not all cast apps do it
-    except Exception as e:
-      sys.stderr.write("now-playing: cast %s failed (%s)\n" % (cmd, e))
-    return
-  action = {"playpause": "play-pause", "next": "next",
-            "previous": "previous"}.get(cmd)
-  if action:
-    try:
-      subprocess.run(["playerctl", "--player=" + PLAYERS, action],
-                     check=False)
-    except FileNotFoundError:
-      pass
+    # While a cast is the live source, drive its media controller (a direct
+    # playerctl cannot reach it -- local MPRIS is a stub then). Else playerctl.
+    with _lock:
+        cast_live = _cast is not None and _cast.get("title")
+        cast_status = _cast.get("status") if cast_live else None
+    conn = _cast_conn
+    if cast_live and conn is not None:
+        try:
+            mc = conn.media_controller
+            if cmd == "playpause":
+                (mc.pause if cast_status == "playing" else mc.play)()
+            elif cmd == "next":
+                mc.skip()
+            elif cmd == "previous":
+                mc.queue_prev()          # best effort; not all cast apps do it
+        except Exception as e:
+            sys.stderr.write("now-playing: cast %s failed (%s)\n" % (cmd, e))
+        return
+    action = {"playpause": "play-pause", "next": "next",
+              "previous": "previous"}.get(cmd)
+    if action:
+        try:
+            subprocess.run(["playerctl", "--player=" + PLAYERS, action],
+                           check=False)
+        except FileNotFoundError:
+            pass
 
 def ctl_loop():
-  try:
-    if not os.path.exists(CTL_FILE):
-      os.mkfifo(CTL_FILE)
-  except OSError as e:
-    sys.stderr.write("now-playing: ctl fifo init failed (%s)\n" % e)
-    return
-  while not _shutdown.is_set():
     try:
-      with open(CTL_FILE) as f:
-        for line in f:
-          cmd = line.strip()
-          if cmd:
-            _do_command(cmd)
-    except Exception:
-      if _shutdown.is_set():
-        break
+        if not os.path.exists(CTL_FILE):
+            os.mkfifo(CTL_FILE)
+    except OSError as e:
+        sys.stderr.write("now-playing: ctl fifo init failed (%s)\n" % e)
+        return
+    while not _shutdown.is_set():
+        try:
+            with open(CTL_FILE) as f:
+                for line in f:
+                    cmd = line.strip()
+                    if cmd:
+                        _do_command(cmd)
+        except Exception:
+            if _shutdown.is_set():
+                break
 
 
 # ---- local MPRIS source ---------------------------------------------------
 def _mpris_follow():
-  """ONE run of the playerctl follower, returning when it exits for any
-  reason. False means playerctl is absent, which no amount of retrying
-  fixes; True means it ran and then ended, which is worth retrying."""
-  global _local, _proc
-  fmt = US.join(("{{lc(status)}}", "{{artist}}", "{{title}}", "{{album}}",
-                 "{{mpris:artUrl}}", "{{mpris:length}}"))
-  cmd = ["playerctl", "--player=" + PLAYERS, "--follow", "metadata",
-         "--format", fmt]
-  try:
-    _proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                             stderr=subprocess.DEVNULL, text=True)
-  except FileNotFoundError:
-    return False
-  for line in _proc.stdout:
-    parts = (line.rstrip("\n").split(US) + [""] * 6)[:6]
-    status, artist, title, album, art, length_us = parts
-    length = 0.0
+    """ONE run of the playerctl follower, returning when it exits for any
+    reason. False means playerctl is absent, which no amount of retrying
+    fixes; True means it ran and then ended, which is worth retrying."""
+    global _local, _proc
+    fmt = US.join(("{{lc(status)}}", "{{artist}}", "{{title}}", "{{album}}",
+                   "{{mpris:artUrl}}", "{{mpris:length}}"))
+    cmd = ["playerctl", "--player=" + PLAYERS, "--follow", "metadata",
+           "--format", fmt]
     try:
-      length = float(length_us) / 1e6
-    except ValueError:
-      pass
-    with _lock:
-      if not title or status == "stopped":
-        _local = None
-      else:
-        prev = _local or {}
-        same = prev.get("title") == title
-        _local = {"status": status, "title": title, "artist": artist,
-                  "album": album, "art": art, "length": length,
-                  "position": (prev.get("position", 0.0)
-                                if same else 0.0),
-                  # A new track restarts the extrapolation anchor; the
-                  # same track keeps interpolating from its last sample.
-                  "mono": (prev.get("mono", 0.0) if same
-                           else time.monotonic()),
-                  "caps": LOCAL_CAPS}
-    publish()
-  return True
+        _proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                 stderr=subprocess.DEVNULL, text=True)
+    except FileNotFoundError:
+        return False
+    for line in _proc.stdout:
+        parts = (line.rstrip("\n").split(US) + [""] * 6)[:6]
+        status, artist, title, album, art, length_us = parts
+        length = 0.0
+        try:
+            length = float(length_us) / 1e6
+        except ValueError:
+            pass
+        with _lock:
+            if not title or status == "stopped":
+                _local = None
+            else:
+                prev = _local or {}
+                same = prev.get("title") == title
+                _local = {"status": status, "title": title, "artist": artist,
+                          "album": album, "art": art, "length": length,
+                          "position": (prev.get("position", 0.0)
+                                        if same else 0.0),
+                          # A new track restarts the extrapolation anchor; the
+                          # same track keeps interpolating from its last sample.
+                          "mono": (prev.get("mono", 0.0) if same
+                                   else time.monotonic()),
+                          "caps": LOCAL_CAPS}
+        publish()
+    return True
 
 
 def mpris_loop():
-  """SUPERVISE the follower. playerctl can exit under us (a D-Bus restart, a
-  crash), and when it does, whatever it last reported becomes UNKNOWABLE.
-  Leaving that last track published would be the one lie this design must not
-  tell: the frame's heartbeat would stay fresh while the data froze, and every
-  consumer is instructed to trust a fresh heartbeat. So DROP the local source
-  first, publish that honestly, and only then restart.
+    """SUPERVISE the follower. playerctl can exit under us (a D-Bus restart, a
+    crash), and when it does, whatever it last reported becomes UNKNOWABLE.
+    Leaving that last track published would be the one lie this design must not
+    tell: the frame's heartbeat would stay fresh while the data froze, and every
+    consumer is instructed to trust a fresh heartbeat. So DROP the local source
+    first, publish that honestly, and only then restart.
 
-  Backoff doubles to a ceiling so a permanently broken playerctl cannot spin,
-  and resets after a run long enough to count as healthy."""
-  global _local
-  delay = 1.0
-  while not _shutdown.is_set():
-    started = time.monotonic()
-    alive = _mpris_follow()
-    if _shutdown.is_set():
-      return
-    if not alive:
-      sys.stderr.write(
-          "now-playing: playerctl not found; local source off\n")
-      return
-    with _lock:
-      _local = None
-    publish()                       # idle, not a phantom track
-    sys.stderr.write(
-        "now-playing: playerctl follower exited; restarting in %.0fs\n"
-        % delay)
-    if time.monotonic() - started > 30.0:
-      delay = 1.0                 # it ran a healthy while; start over
-    _shutdown.wait(delay)
-    delay = min(delay * 2.0, 30.0)
+    Backoff doubles to a ceiling so a permanently broken playerctl cannot spin,
+    and resets after a run long enough to count as healthy."""
+    global _local
+    delay = 1.0
+    while not _shutdown.is_set():
+        started = time.monotonic()
+        alive = _mpris_follow()
+        if _shutdown.is_set():
+            return
+        if not alive:
+            sys.stderr.write(
+                "now-playing: playerctl not found; local source off\n")
+            return
+        with _lock:
+            _local = None
+        publish()                       # idle, not a phantom track
+        sys.stderr.write(
+            "now-playing: playerctl follower exited; restarting in %.0fs\n"
+            % delay)
+        if time.monotonic() - started > 30.0:
+            delay = 1.0                 # it ran a healthy while; start over
+        _shutdown.wait(delay)
+        delay = min(delay * 2.0, 30.0)
 
 
 # ---- Chromecast FALLBACK --------------------------------------------------
 def _to_status(ms):
-  st = (ms.player_state or "").upper()
-  return {"PLAYING": "playing", "BUFFERING": "playing",
-          "PAUSED": "paused"}.get(st, "stopped")
+    st = (ms.player_state or "").upper()
+    return {"PLAYING": "playing", "BUFFERING": "playing",
+            "PAUSED": "paused"}.get(st, "stopped")
 
 def _cast_caps(ms):
-  """What this cast app ACTUALLY supports, read from its media status. A
-  clear bit tells a renderer to draw the control inert rather than offer an
-  affordance that silently does nothing (queue_prev is the usual absentee).
-  getattr-guarded so a pychromecast version without a flag reads as absent
-  rather than raising."""
-  caps = 0
-  if getattr(ms, "supports_pause", False):
-    caps |= npframe.CAP_PAUSE
-  if (getattr(ms, "supports_skip_forward", False)
-          or getattr(ms, "supports_queue_next", False)):
-    caps |= npframe.CAP_NEXT
-  if (getattr(ms, "supports_skip_backward", False)
-          or getattr(ms, "supports_queue_prev", False)):
-    caps |= npframe.CAP_PREV
-  if getattr(ms, "supports_seek", False):
-    caps |= npframe.CAP_SEEK
-  return caps
+    """What this cast app ACTUALLY supports, read from its media status. A
+    clear bit tells a renderer to draw the control inert rather than offer an
+    affordance that silently does nothing (queue_prev is the usual absentee).
+    getattr-guarded so a pychromecast version without a flag reads as absent
+    rather than raising."""
+    caps = 0
+    if getattr(ms, "supports_pause", False):
+        caps |= npframe.CAP_PAUSE
+    if (getattr(ms, "supports_skip_forward", False)
+            or getattr(ms, "supports_queue_next", False)):
+        caps |= npframe.CAP_NEXT
+    if (getattr(ms, "supports_skip_backward", False)
+            or getattr(ms, "supports_queue_prev", False)):
+        caps |= npframe.CAP_PREV
+    if getattr(ms, "supports_seek", False):
+        caps |= npframe.CAP_SEEK
+    return caps
 
 
 def _read_media(ms, name):
-  art = ""
-  try:
-    if ms.images:
-      art = ms.images[0].url or ""
-  except Exception:
-    pass
-  return {"device": name, "status": _to_status(ms),
-          "title": ms.title or "", "artist": ms.artist or "",
-          "album": ms.album_name or "", "art": art,
-          "position": ms.adjusted_current_time or 0.0,
-          "length": ms.duration or 0.0,
-          "mono": time.monotonic(), "caps": _cast_caps(ms)}
+    art = ""
+    try:
+        if ms.images:
+            art = ms.images[0].url or ""
+    except Exception:
+        pass
+    return {"device": name, "status": _to_status(ms),
+            "title": ms.title or "", "artist": ms.artist or "",
+            "album": ms.album_name or "", "art": art,
+            "position": ms.adjusted_current_time or 0.0,
+            "length": ms.duration or 0.0,
+            "mono": time.monotonic(), "caps": _cast_caps(ms)}
 
 CAST_MEDIA, CAST_NATIVE, CAST_PENDING = "media", "native", "pending"
 
 
 def _classify_cast(cast_status):
-  """THREE-way, because "not a media receiver" and "not a media receiver YET"
-  must never be treated alike.
+    """THREE-way, because "not a media receiver" and "not a media receiver YET"
+    must never be treated alike.
 
-  A receiver publishes its namespaces ASYNCHRONOUSLY after launch, so a probe
-  landing inside that window sees a perfectly valid 8-hex app id with no media
-  namespace yet. The old two-way answer called that a refusal, the caller
-  blacklisted the device on it, and the daemon then went blind to a LIVE cast
-  for the rest of that app's session. Measured on manifold 2026-09-18: a
-  casting device the gate would have accepted was reported idle for days, and
-  a restart picked it up in 4 seconds.
+    A receiver publishes its namespaces ASYNCHRONOUSLY after launch, so a probe
+    landing inside that window sees a perfectly valid 8-hex app id with no media
+    namespace yet. The old two-way answer called that a refusal, the caller
+    blacklisted the device on it, and the daemon then went blind to a LIVE cast
+    for the rest of that app's session. Measured on manifold 2026-09-18: a
+    casting device the gate would have accepted was reported idle for days, and
+    a restart picked it up in 4 seconds.
 
-    media   -- a real Cast media receiver is running; safe to drive.
-    native  -- a genuine native app (app_id 'AndroidNativeApp' fails the hex
-               test). NEVER drive this; it is someone's TV.
-    pending -- nothing running, or a receiver still coming up. Inconclusive,
-               so the caller must RETRY rather than remember it.
+      media   -- a real Cast media receiver is running; safe to drive.
+      native  -- a genuine native app (app_id 'AndroidNativeApp' fails the hex
+                 test). NEVER drive this; it is someone's TV.
+      pending -- nothing running, or a receiver still coming up. Inconclusive,
+                 so the caller must RETRY rather than remember it.
 
-  Read from the passive receiver broadcast; no media controller touched."""
-  aid = cast_status.app_id or ""
-  if not aid:
-    return CAST_PENDING
-  if not re.fullmatch(r"[0-9A-Fa-f]{8}", aid):
-    return CAST_NATIVE
-  if MEDIA_NS not in (cast_status.namespaces or []):
-    return CAST_PENDING
-  return CAST_MEDIA
+    Read from the passive receiver broadcast; no media controller touched."""
+    aid = cast_status.app_id or ""
+    if not aid:
+        return CAST_PENDING
+    if not re.fullmatch(r"[0-9A-Fa-f]{8}", aid):
+        return CAST_NATIVE
+    if MEDIA_NS not in (cast_status.namespaces or []):
+        return CAST_PENDING
+    return CAST_MEDIA
 
 
 def _is_cast_media(cast_status):
-  """True iff a real Cast media receiver is ALREADY running. The strict
-  reading, used for the liveness re-check on a connection we already hold."""
-  return _classify_cast(cast_status) == CAST_MEDIA
+    """True iff a real Cast media receiver is ALREADY running. The strict
+    reading, used for the liveness re-check on a connection we already hold."""
+    return _classify_cast(cast_status) == CAST_MEDIA
 
 
 def _notcast_entry(kind, rs, now):
-  """The blacklist POLICY, kept out of cast_main's closure so it can be
-  tested. Returns the entry to remember, or None to remember nothing.
+    """The blacklist POLICY, kept out of cast_main's closure so it can be
+    tested. Returns the entry to remember, or None to remember nothing.
 
-  Both halves are the fix: only a CONFIRMED native app is remembered at all,
-  and even that expires. The defect was a caller that remembered every
-  non-media answer, forever -- so a probe that merely arrived early, before a
-  launching receiver had published its namespaces, blacklisted a device that
-  was about to start casting and never reconsidered."""
-  if kind != CAST_NATIVE:
-    return None
-  return (rs, now + NOTCAST_TTL)
+    Both halves are the fix: only a CONFIRMED native app is remembered at all,
+    and even that expires. The defect was a caller that remembered every
+    non-media answer, forever -- so a probe that merely arrived early, before a
+    launching receiver had published its namespaces, blacklisted a device that
+    was about to start casting and never reconsidered."""
+    if kind != CAST_NATIVE:
+        return None
+    return (rs, now + NOTCAST_TTL)
 
 def _drop_cast_source():
-  """Clear the cast source and publish that. Module level so the SUPERVISOR can
-  reach it: a worker that dies holding a live cast would otherwise leave that
-  track published behind a FRESH heartbeat, which is the one lie this design
-  must not tell."""
-  global _cast, _cast_conn, _cast_uuid
-  c, _cast_conn, _cast_uuid = _cast_conn, None, None
-  if c is not None:
-    try:
-      c.disconnect()
-    except Exception:
-      pass
-  with _lock:
-    was = _cast is not None
-    _cast = None
-  if was:
-    publish()
+    """Clear the cast source and publish that. Module level so the
+    SUPERVISOR can reach it: a worker that dies holding a live cast would
+    otherwise leave that track published behind a FRESH heartbeat, which is
+    the one lie this design must not tell."""
+    global _cast, _cast_conn, _cast_uuid
+    c, _cast_conn, _cast_uuid = _cast_conn, None, None
+    if c is not None:
+        try:
+            c.disconnect()
+        except Exception:
+            pass
+    with _lock:
+        was = _cast is not None
+        _cast = None
+    if was:
+        publish()
 
 
 def _drop_browser():
-  """Tear discovery down. Also module level, because a worker that died holding
-  a browser must not leak its zeroconf socket and threads into the restart."""
-  global _zc, _browser
-  b, z, _browser, _zc = _browser, _zc, None, None
-  if b is not None:
-    try:
-      from pychromecast import discovery
-      discovery.stop_discovery(b)
-    except Exception:
-      pass
-  if z is not None:
-    try:
-      z.close()
-    except Exception:
-      pass
-  with _seen_lock:
-    _seen.clear()
+    """Tear discovery down. Also module level, because a worker that died
+    holding a browser must not leak its zeroconf socket and threads into
+    the restart."""
+    global _zc, _browser
+    b, z, _browser, _zc = _browser, _zc, None, None
+    if b is not None:
+        try:
+            from pychromecast import discovery
+            discovery.stop_discovery(b)
+        except Exception:
+            pass
+    if z is not None:
+        try:
+            z.close()
+        except Exception:
+            pass
+    with _seen_lock:
+        _seen.clear()
 
 
 def cast_main():
-  """SUPERVISE the cast worker, for exactly the reason mpris_loop supervises the
-  follower: a dead thread leaves its source frozen behind a fresh heartbeat, and
-  every consumer is instructed to trust a fresh heartbeat.
+    """SUPERVISE the cast worker, for exactly the reason mpris_loop
+    supervises the follower: a dead thread leaves its source frozen behind
+    a fresh heartbeat, and every consumer is instructed to trust a fresh
+    heartbeat.
 
-  The exposure is measured, not theoretical. _cast_run rebuilds discovery every
-  REDISC_SECS, and start_browser() constructs a zeroconf socket -- roughly 288
-  unguarded constructions a day, any one of which can fail on a transient
-  network condition. Before this, one such failure killed the cast path until
-  the daemon was restarted, in total silence. The hardening pass that fixed this
-  for MPRIS in 760ae85 did not cover the cast side."""
-  delay = CAST_RETRY
-  while not _shutdown.is_set():
-    started = time.monotonic()
-    try:
-      _cast_run()
-      return                    # a clean return is the worker opting out
-    except Exception as e:
-      if _shutdown.is_set():
-        return
-      _drop_cast_source()       # publish idle, never a frozen track
-      _drop_browser()
-      sys.stderr.write(
-          "now-playing: cast worker died (%s); restarting in %.0fs\n"
-          % (e, delay))
-    if time.monotonic() - started > 60.0:
-      delay = CAST_RETRY        # it ran a healthy while; start the backoff over
-    _shutdown.wait(delay)
-    delay = min(delay * 2.0, 60.0)
+    The exposure is measured, not theoretical. _cast_run rebuilds discovery
+    every REDISC_SECS, and start_browser() constructs a zeroconf socket --
+    roughly 288 unguarded constructions a day, any one of which can fail on
+    a transient network condition. Before this, one such failure killed the
+    cast path until the daemon was restarted, in total silence. The
+    hardening pass that fixed this for MPRIS in 760ae85 did not cover the
+    cast side."""
+    delay = CAST_RETRY
+    while not _shutdown.is_set():
+        started = time.monotonic()
+        try:
+            _cast_run()
+            return                    # a clean return is the worker opting out
+        except Exception as e:
+            if _shutdown.is_set():
+                return
+            # publish idle, never a frozen track
+            _drop_cast_source()
+            _drop_browser()
+            sys.stderr.write(
+                "now-playing: cast worker died (%s); restarting in %.0fs\n"
+                % (e, delay))
+        if time.monotonic() - started > 60.0:
+            # it ran a healthy while; start the backoff over
+            delay = CAST_RETRY
+        _shutdown.wait(delay)
+        delay = min(delay * 2.0, 60.0)
 
 
 def _cast_run():
-  global _zc, _browser, _cast, _cast_conn, _cast_uuid
-  try:
-    import zeroconf, pychromecast
-    from pychromecast import discovery
-    from pychromecast.controllers.media import MediaStatusListener
-  except Exception as e:                       # degrade to MPRIS-only
-    sys.stderr.write("now-playing: cast fallback disabled (%s)\n" % e)
-    return
-
-  # uuid -> (rs, deadline): probed and found to be a genuine NATIVE app. The
-  # deadline is the load-bearing part. An unbounded entry turns ONE bad probe
-  # into permanent blindness, and only a CONFIRMED native app earns one at all
-  # (see _classify_cast); a still-launching receiver is retried instead.
-  notcast = {}
-  def add(uuid, service):
-    with _seen_lock:
-      _seen[uuid] = service
-  def remove(uuid, service, info):
-    with _seen_lock:
-      _seen.pop(uuid, None)
-    notcast.pop(uuid, None)
-
-  def start_browser():
-    global _zc, _browser
-    _zc = zeroconf.Zeroconf()
-    _browser = discovery.CastBrowser(
-        discovery.SimpleCastListener(add_callback=add, update_callback=add,
-                                     remove_callback=remove), _zc)
-    _browser.start_discovery()
-
-  def stop_browser():
-    # Tear discovery down so it can be recreated with a fresh multicast
-    # socket. Only the discovery browser is affected -- a live cast keeps
-    # its own device connection -- and we only call this while idle.
-    _drop_browser()
-    # The blacklist dies WITH the browser that built it. Leaving it behind
-    # is what let a stale refusal outlive every rediscovery cycle: _seen was
-    # rebuilt from scratch each time while notcast silently persisted, so
-    # the periodic refresh that exists to recover from staleness could never
-    # actually recover from this one.
-    notcast.clear()
-
-  start_browser()
-  disc_at = time.time()
-
-  class Listener(MediaStatusListener):
-    def __init__(self, name):
-      self.name = name
-    def new_media_status(self, status):
-      global _cast
-      st = _to_status(status)
-      if st in ("playing", "paused") and (status.title or status.artist):
-        with _lock:
-          _cast = _read_media(status, self.name)
-      else:
-        with _lock:
-          _cast = None
-      publish()
-    def load_media_failed(self, item, code):
-      pass
-
-  def mdns_txt(service):
-    """Device's mDNS TXT (decoded, cache-only -- no network I/O). st='1' =>
-    an app is running; rs => the running app's name (changes per cast)."""
+    global _zc, _browser, _cast, _cast_conn, _cast_uuid
     try:
-      info = zeroconf.ServiceInfo("_googlecast._tcp.local.", service)
-      if not info.load_from_cache(_zc):
-        return {}
-      return {k.decode("utf-8", "replace"):
-              (v or b"").decode("utf-8", "replace")
-              for k, v in info.properties.items()}
-    except Exception:
-      return {}
+        import zeroconf, pychromecast
+        from pychromecast import discovery
+        from pychromecast.controllers.media import MediaStatusListener
+    except Exception as e:                       # degrade to MPRIS-only
+        sys.stderr.write("now-playing: cast fallback disabled (%s)\n" % e)
+        return
 
-  def drop():
-    _drop_cast_source()
+    # uuid -> (rs, deadline): probed and found to be a genuine NATIVE app. The
+    # deadline is the load-bearing part. An unbounded entry turns ONE bad probe
+    # into permanent blindness, and only a CONFIRMED native app earns one at all
+    # (see _classify_cast); a still-launching receiver is retried instead.
+    notcast = {}
+    def add(uuid, service):
+        with _seen_lock:
+            _seen[uuid] = service
+    def remove(uuid, service, info):
+        with _seen_lock:
+            _seen.pop(uuid, None)
+        notcast.pop(uuid, None)
 
-  while not _shutdown.wait(CAST_SECS):
-    with _lock:
-      local_live = (_local is not None and _local.get("title")
-                    and _local["status"] in ("playing", "paused"))
-    # Local wins: never hold a cast connection while playing locally.
-    if local_live:
-      if _cast_conn is not None:
-        drop()
-      continue
+    def start_browser():
+        global _zc, _browser
+        _zc = zeroconf.Zeroconf()
+        _browser = discovery.CastBrowser(
+            discovery.SimpleCastListener(add_callback=add, update_callback=add,
+                                         remove_callback=remove), _zc)
+        _browser.start_discovery()
 
-    # Have a live cast: refresh (position) and validate it is still casting.
-    if _cast_conn is not None:
-      try:
-        if not _is_cast_media(_cast_conn.status):
-          drop(); continue
-        _cast_conn.media_controller.update_status()   # -> Listener
-      except Exception:
-        drop()
-      continue
+    def stop_browser():
+        # Tear discovery down so it can be recreated with a fresh multicast
+        # socket. Only the discovery browser is affected -- a live cast keeps
+        # its own device connection -- and we only call this while idle.
+        _drop_browser()
+        # The blacklist dies WITH the browser that built it. Leaving it behind
+        # is what let a stale refusal outlive every rediscovery cycle: _seen was
+        # rebuilt from scratch each time while notcast silently persisted, so
+        # the periodic refresh that exists to recover from staleness could never
+        # actually recover from this one.
+        notcast.clear()
 
-    # Idle with no live cast: periodically rebuild discovery. A long-lived
-    # zeroconf multicast socket can stop receiving a device's TXT updates
-    # (network events, group drop, days of uptime), so a device that starts
-    # casting is silently missed -- its cached st never flips to "1". A
-    # fresh browser refreshes the socket. Safe here: no live cast needs it.
-    if time.time() - disc_at > REDISC_SECS:
-      stop_browser()
-      start_browser()
-      disc_at = time.time()
+    start_browser()
+    disc_at = time.time()
 
-    # No cast yet + local idle: probe active devices, gate on app_id.
-    with _seen_lock:
-      candidates = list(_seen.items())
-    for uuid, service in candidates:
-      if _shutdown.is_set():
-        break
-      txt = mdns_txt(service)
-      if txt.get("st") != "1":              # only an app-running device
-        continue
-      rs = txt.get("rs", "")
-      hit = notcast.get(uuid)               # probed native, still fresh?
-      if hit and hit[0] == rs and time.monotonic() < hit[1]:
-        continue
-      info = _browser.devices.get(uuid)
-      if not info:
-        continue
-      try:
-        cast = pychromecast.get_chromecast_from_cast_info(info, _zc)
-        cast.wait(timeout=10)
-      except Exception:
-        continue
-      # READ-ONLY gate: is a real Cast media receiver already running?
-      kind = _classify_cast(cast.status)
-      if kind != CAST_MEDIA:
-        entry = _notcast_entry(kind, rs, time.monotonic())
-        if entry is not None:
-          notcast[uuid] = entry
+    class Listener(MediaStatusListener):
+        def __init__(self, name):
+            self.name = name
+        def new_media_status(self, status):
+            global _cast
+            st = _to_status(status)
+            if st in ("playing", "paused") and (status.title or status.artist):
+                with _lock:
+                    _cast = _read_media(status, self.name)
+            else:
+                with _lock:
+                    _cast = None
+            publish()
+        def load_media_failed(self, item, code):
+            pass
+
+    def mdns_txt(service):
+        """Device's mDNS TXT (decoded, cache-only -- no network I/O). st='1' =>
+        an app is running; rs => the running app's name (changes per cast)."""
         try:
-          cast.disconnect()             # native app / idle
+            info = zeroconf.ServiceInfo("_googlecast._tcp.local.", service)
+            if not info.load_from_cache(_zc):
+                return {}
+            return {k.decode("utf-8", "replace"):
+                    (v or b"").decode("utf-8", "replace")
+                    for k, v in info.properties.items()}
         except Exception:
-          pass
-        continue
-      # Confirmed: safe to engage the media controller.
-      notcast.pop(uuid, None)
-      _cast_conn = cast
-      _cast_uuid = uuid
-      cast.media_controller.register_status_listener(Listener(
-          info.friendly_name))
-      try:
-        cast.media_controller.update_status()
-      except Exception:
-        pass
-      break
+            return {}
+
+    def drop():
+        _drop_cast_source()
+
+    while not _shutdown.wait(CAST_SECS):
+        with _lock:
+            local_live = (_local is not None and _local.get("title")
+                          and _local["status"] in ("playing", "paused"))
+        # Local wins: never hold a cast connection while playing locally.
+        if local_live:
+            if _cast_conn is not None:
+                drop()
+            continue
+
+        # Have a live cast: refresh (position) and validate it is still casting.
+        if _cast_conn is not None:
+            try:
+                if not _is_cast_media(_cast_conn.status):
+                    drop(); continue
+                _cast_conn.media_controller.update_status()   # -> Listener
+            except Exception:
+                drop()
+            continue
+
+        # Idle with no live cast: periodically rebuild discovery. A long-lived
+        # zeroconf multicast socket can stop receiving a device's TXT updates
+        # (network events, group drop, days of uptime), so a device that starts
+        # casting is silently missed -- its cached st never flips to "1". A
+        # fresh browser refreshes the socket. Safe here: no live cast needs it.
+        if time.time() - disc_at > REDISC_SECS:
+            stop_browser()
+            start_browser()
+            disc_at = time.time()
+
+        # No cast yet + local idle: probe active devices, gate on app_id.
+        with _seen_lock:
+            candidates = list(_seen.items())
+        for uuid, service in candidates:
+            if _shutdown.is_set():
+                break
+            txt = mdns_txt(service)
+            if txt.get("st") != "1":              # only an app-running device
+                continue
+            rs = txt.get("rs", "")
+            hit = notcast.get(uuid)               # probed native, still fresh?
+            if hit and hit[0] == rs and time.monotonic() < hit[1]:
+                continue
+            info = _browser.devices.get(uuid)
+            if not info:
+                continue
+            try:
+                cast = pychromecast.get_chromecast_from_cast_info(info, _zc)
+                cast.wait(timeout=10)
+            except Exception:
+                continue
+            # READ-ONLY gate: is a real Cast media receiver already running?
+            kind = _classify_cast(cast.status)
+            if kind != CAST_MEDIA:
+                entry = _notcast_entry(kind, rs, time.monotonic())
+                if entry is not None:
+                    notcast[uuid] = entry
+                try:
+                    cast.disconnect()             # native app / idle
+                except Exception:
+                    pass
+                continue
+            # Confirmed: safe to engage the media controller.
+            notcast.pop(uuid, None)
+            _cast_conn = cast
+            _cast_uuid = uuid
+            cast.media_controller.register_status_listener(Listener(
+                info.friendly_name))
+            try:
+                cast.media_controller.update_status()
+            except Exception:
+                pass
+            break
 
 
 # ---- clean shutdown -------------------------------------------------------
 def _cleanup(*_):
-  if _shutdown.is_set():
-    return
-  _shutdown.set()
-  if _frame is not None:
-    # Publish a final IDLE frame so consumers see the stop AT ONCE instead
-    # of waiting out the staleness window on a frozen last track.
+    if _shutdown.is_set():
+        return
+    _shutdown.set()
+    if _frame is not None:
+        # Publish a final IDLE frame so consumers see the stop AT ONCE instead
+        # of waiting out the staleness window on a frozen last track.
+        try:
+            _frame.publish()
+        except Exception:
+            pass
     try:
-      _frame.publish()
-    except Exception:
-      pass
-  try:
-    if os.path.exists(CTL_FILE):
-      os.unlink(CTL_FILE)
-  except OSError:
-    pass
-  if _spectrum is not None:
-    try:
-      _spectrum.close()
-    except Exception:
-      pass
-  if _proc and _proc.poll() is None:
-    try:
-      _proc.terminate()
-    except Exception:
-      pass
-  if _cast_conn is not None:
-    try:
-      _cast_conn.disconnect()
-    except Exception:
-      pass
-  if _browser is not None:
-    try:
-      from pychromecast import discovery
-      discovery.stop_discovery(_browser)
-    except Exception:
-      pass
-  if _zc is not None:
-    try:
-      _zc.close()
-    except Exception:
-      pass
+        if os.path.exists(CTL_FILE):
+            os.unlink(CTL_FILE)
+    except OSError:
+        pass
+    if _spectrum is not None:
+        try:
+            _spectrum.close()
+        except Exception:
+            pass
+    if _proc and _proc.poll() is None:
+        try:
+            _proc.terminate()
+        except Exception:
+            pass
+    if _cast_conn is not None:
+        try:
+            _cast_conn.disconnect()
+        except Exception:
+            pass
+    if _browser is not None:
+        try:
+            from pychromecast import discovery
+            discovery.stop_discovery(_browser)
+        except Exception:
+            pass
+    if _zc is not None:
+        try:
+            _zc.close()
+        except Exception:
+            pass
 
 def _on_signal(signum, frame):
-  _cleanup()                                   # main thread wakes from wait()
+    _cleanup()                                   # main thread wakes from wait()
 
 
 # ---- command-line readers -------------------------------------------------
@@ -830,204 +836,204 @@ USAGE = """usage: now-playing [COMMAND]
 
 
 def _mmss(s):
-  s = int(max(0.0, s) + 0.5)
-  return "%d:%02d" % (s // 60, s % 60)
+    s = int(max(0.0, s) + 0.5)
+    return "%d:%02d" % (s // 60, s % 60)
 
 
 def _open_reader():
-  try:
-    return npframe.Reader()
-  except FileNotFoundError:
-    return None
-  except OSError:
-    return None
+    try:
+        return npframe.Reader()
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return None
 
 
 def _sample(slot):
-  """Read a frame, (re)opening the mapping when we have none. The retry is
-  what lets a consumer start BEFORE the daemon and pick it up later; the
-  daemon never unlinks the segment, so a live mapping survives a restart."""
-  if slot[0] is None:
-    slot[0] = _open_reader()
+    """Read a frame, (re)opening the mapping when we have none. The retry is
+    what lets a consumer start BEFORE the daemon and pick it up later; the
+    daemon never unlinks the segment, so a live mapping survives a restart."""
     if slot[0] is None:
-      return None
-  try:
-    return slot[0].read()
-  except npframe.FrameVersionError as e:
-    sys.stderr.write("now-playing: %s\n" % e)
-    raise SystemExit(3)
+        slot[0] = _open_reader()
+        if slot[0] is None:
+            return None
+    try:
+        return slot[0].read()
+    except npframe.FrameVersionError as e:
+        sys.stderr.write("now-playing: %s\n" % e)
+        raise SystemExit(3)
 
 
 def _status_lines(f):
-  rows = [("status", f["status"]), ("source", f["source"] or "-")]
-  if f["device"]:
-    rows.append(("device", f["device"]))
-  for k in ("title", "artist", "album"):
-    if f[k]:
-      rows.append((k, f[k]))
-  if f["length"] > 0:
-    rows.append(("position", "%s / %s" % (_mmss(f["position"]),
-                                          _mmss(f["length"]))))
-  elif f["status"] != "idle":
-    rows.append(("position", _mmss(f["position"])))
-  rows.append(("caps", " ".join(f["caps_names"]) or "-"))
-  if f["bands"]:
-    rows.append(("bands", str(len(f["bands"]))))
-  rows.append(("track", str(f["track_id"])))
-  rows.append(("age", "%.2fs" % npframe.age_secs(f)))
-  return "\n".join("%-9s %s" % (k, v) for k, v in rows)
+    rows = [("status", f["status"]), ("source", f["source"] or "-")]
+    if f["device"]:
+        rows.append(("device", f["device"]))
+    for k in ("title", "artist", "album"):
+        if f[k]:
+            rows.append((k, f[k]))
+    if f["length"] > 0:
+        rows.append(("position", "%s / %s" % (_mmss(f["position"]),
+                                              _mmss(f["length"]))))
+    elif f["status"] != "idle":
+        rows.append(("position", _mmss(f["position"])))
+    rows.append(("caps", " ".join(f["caps_names"]) or "-"))
+    if f["bands"]:
+        rows.append(("bands", str(len(f["bands"]))))
+    rows.append(("track", str(f["track_id"])))
+    rows.append(("age", "%.2fs" % npframe.age_secs(f)))
+    return "\n".join("%-9s %s" % (k, v) for k, v in rows)
 
 
 def _discrete_key(f):
-  """What --follow reacts to by default: the EVENTFUL half of the frame.
-  Position moves every frame, so reacting to it would make a script consumer
-  a firehose; --interval is there for a caller that wants the motion."""
-  if f is None:
-    return None
-  return (f["status"], f["source"], f["title"], f["artist"], f["album"],
-          f["device"], f["art"], f["caps"], f["track_id"])
+    """What --follow reacts to by default: the EVENTFUL half of the frame.
+    Position moves every frame, so reacting to it would make a script consumer
+    a firehose; --interval is there for a caller that wants the motion."""
+    if f is None:
+        return None
+    return (f["status"], f["source"], f["title"], f["artist"], f["album"],
+            f["device"], f["art"], f["caps"], f["track_id"])
 
 
 def _emit(f, as_json):
-  live = npframe.is_live(f)
-  if as_json:
-    out = dict(f) if f else {}
-    out["live"] = live
-    out["age"] = round(npframe.age_secs(f), 4) if f else None
-    print(json.dumps(out, ensure_ascii=False), flush=True)
-  elif live:
-    print(_status_lines(f), flush=True)
-  else:
-    print("status    unavailable (no live frame)", flush=True)
-  return live
+    live = npframe.is_live(f)
+    if as_json:
+        out = dict(f) if f else {}
+        out["live"] = live
+        out["age"] = round(npframe.age_secs(f), 4) if f else None
+        print(json.dumps(out, ensure_ascii=False), flush=True)
+    elif live:
+        print(_status_lines(f), flush=True)
+    else:
+        print("status    unavailable (no live frame)", flush=True)
+    return live
 
 
 def _status_args(argv):
-  as_json = follow = False
-  interval = None
-  i = 0
-  while i < len(argv):
-    a = argv[i]
-    if a == "--json":
-      as_json = True
-    elif a == "--follow":
-      follow = True
-    elif a == "--interval":
-      i += 1
-      if i >= len(argv):
-        _die("status: --interval needs SECONDS")
-      try:
-        interval = float(argv[i])
-      except ValueError:
-        _die("status: --interval: not a number: %s" % argv[i])
-      if interval <= 0:
-        _die("status: --interval must be positive")
-      follow = True
-    else:
-      _die("status: unknown option '%s'\n%s" % (a, USAGE))
-    i += 1
-  return as_json, follow, interval
+    as_json = follow = False
+    interval = None
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--json":
+            as_json = True
+        elif a == "--follow":
+            follow = True
+        elif a == "--interval":
+            i += 1
+            if i >= len(argv):
+                _die("status: --interval needs SECONDS")
+            try:
+                interval = float(argv[i])
+            except ValueError:
+                _die("status: --interval: not a number: %s" % argv[i])
+            if interval <= 0:
+                _die("status: --interval must be positive")
+            follow = True
+        else:
+            _die("status: unknown option '%s'\n%s" % (a, USAGE))
+        i += 1
+    return as_json, follow, interval
 
 
 def cmd_status(argv):
-  as_json, follow, interval = _status_args(argv)
-  slot = [_open_reader()]
-  if not follow:
-    return 0 if _emit(_sample(slot), as_json) else 1
-  last = object()                       # a sentinel no key can equal
-  try:
-    while True:
-      f = _sample(slot)
-      if interval is not None:
-        _emit(f, as_json)
-      else:
-        key = (_discrete_key(f), npframe.is_live(f))
-        if key != last:
-          last = key
-          _emit(f, as_json)
-      time.sleep(interval if interval is not None else 0.05)
-  except (KeyboardInterrupt, BrokenPipeError):
-    return 0
+    as_json, follow, interval = _status_args(argv)
+    slot = [_open_reader()]
+    if not follow:
+        return 0 if _emit(_sample(slot), as_json) else 1
+    last = object()                       # a sentinel no key can equal
+    try:
+        while True:
+            f = _sample(slot)
+            if interval is not None:
+                _emit(f, as_json)
+            else:
+                key = (_discrete_key(f), npframe.is_live(f))
+                if key != last:
+                    last = key
+                    _emit(f, as_json)
+            time.sleep(interval if interval is not None else 0.05)
+    except (KeyboardInterrupt, BrokenPipeError):
+        return 0
 
 
 def cmd_shm_info(argv):
-  for a in argv:
-    if a != "--json":
-      _die("shm-info: unknown option '%s'\n%s" % (a, USAGE))
-  as_json = "--json" in argv
-  path = npframe.frame_path()
-  info = {"path": path, "understands_version": npframe.VERSION,
-          "max_bands": npframe.MAX_BANDS, "version": None,
-          "frame_bytes": None, "live": False, "present": False}
-  try:
-    _magic, ver, fb = npframe.peek_header(path)
-    info.update(present=True, version=ver, frame_bytes=fb)
-  except OSError:
-    pass
-  if info["version"] == npframe.VERSION:
-    # Only ask for a coherent read when the version is one we parse; the
-    # whole point of this command is to REPORT a mismatch, not die on it.
-    info["live"] = npframe.is_live(_sample([_open_reader()]))
-  if as_json:
-    print(json.dumps(info), flush=True)
-  else:
-    for k in ("path", "present", "version", "understands_version",
-              "frame_bytes", "max_bands", "live"):
-      v = info[k]
-      print("%-19s %s" % (k, "-" if v is None else v))
-  return 0 if info["present"] else 1
+    for a in argv:
+        if a != "--json":
+            _die("shm-info: unknown option '%s'\n%s" % (a, USAGE))
+    as_json = "--json" in argv
+    path = npframe.frame_path()
+    info = {"path": path, "understands_version": npframe.VERSION,
+            "max_bands": npframe.MAX_BANDS, "version": None,
+            "frame_bytes": None, "live": False, "present": False}
+    try:
+        _magic, ver, fb = npframe.peek_header(path)
+        info.update(present=True, version=ver, frame_bytes=fb)
+    except OSError:
+        pass
+    if info["version"] == npframe.VERSION:
+        # Only ask for a coherent read when the version is one we parse; the
+        # whole point of this command is to REPORT a mismatch, not die on it.
+        info["live"] = npframe.is_live(_sample([_open_reader()]))
+    if as_json:
+        print(json.dumps(info), flush=True)
+    else:
+        for k in ("path", "present", "version", "understands_version",
+                  "frame_bytes", "max_bands", "live"):
+            v = info[k]
+            print("%-19s %s" % (k, "-" if v is None else v))
+    return 0 if info["present"] else 1
 
 
 # ---- main -----------------------------------------------------------------
 def run_daemon():
-  global PLAYERS, _frame, _spectrum
-  cfg = load_config()
-  PLAYERS = cfg["players"]
-  signal.signal(signal.SIGINT, _on_signal)
-  signal.signal(signal.SIGTERM, _on_signal)
-  # Sweep the RETIRED JSON projection. It lives in tmpfs, so a file left by an
-  # older daemon would sit there with frozen content until reboot, looking
-  # exactly like live state to anyone debugging. A removed thing should leave
-  # nothing behind that can still be read.
-  try:
-    os.unlink(os.path.join(RUN, "now-playing.state"))
-  except OSError:
-    pass
-  _frame = npframe.Writer()                    # publishes an idle frame
-  if cfg["spectrum"] == "on":
-    # Degrade the way the cast fallback does: say so and carry on without
-    # it. numpy lives in the venv, so an interpreter without it loses the
-    # spectrum, not the daemon.
+    global PLAYERS, _frame, _spectrum
+    cfg = load_config()
+    PLAYERS = cfg["players"]
+    signal.signal(signal.SIGINT, _on_signal)
+    signal.signal(signal.SIGTERM, _on_signal)
+    # Sweep the RETIRED JSON projection. It lives in tmpfs, so a file left by an
+    # older daemon would sit there with frozen content until reboot, looking
+    # exactly like live state to anyone debugging. A removed thing should leave
+    # nothing behind that can still be read.
     try:
-      import npspectrum_lib as npspectrum
-      _spectrum = npspectrum.Spectrum(cfg)
-    except Exception as e:
-      sys.stderr.write("now-playing: spectrum disabled (%s)\n" % e)
-      _spectrum = None
-  publish()                                    # initial idle
-  threading.Thread(target=mpris_loop, daemon=True).start()
-  threading.Thread(target=ctl_loop, daemon=True).start()
-  threading.Thread(target=position_loop, daemon=True).start()
-  threading.Thread(target=cast_main, daemon=True).start()
-  threading.Thread(target=frame_loop, args=(cfg["publish_hz"],),
-                   daemon=True).start()
-  _shutdown.wait()                             # until a signal
-  return 0
+        os.unlink(os.path.join(RUN, "now-playing.state"))
+    except OSError:
+        pass
+    _frame = npframe.Writer()                    # publishes an idle frame
+    if cfg["spectrum"] == "on":
+        # Degrade the way the cast fallback does: say so and carry on without
+        # it. numpy lives in the venv, so an interpreter without it loses the
+        # spectrum, not the daemon.
+        try:
+            import npspectrum_lib as npspectrum
+            _spectrum = npspectrum.Spectrum(cfg)
+        except Exception as e:
+            sys.stderr.write("now-playing: spectrum disabled (%s)\n" % e)
+            _spectrum = None
+    publish()                                    # initial idle
+    threading.Thread(target=mpris_loop, daemon=True).start()
+    threading.Thread(target=ctl_loop, daemon=True).start()
+    threading.Thread(target=position_loop, daemon=True).start()
+    threading.Thread(target=cast_main, daemon=True).start()
+    threading.Thread(target=frame_loop, args=(cfg["publish_hz"],),
+                     daemon=True).start()
+    _shutdown.wait()                             # until a signal
+    return 0
 
 
 def main(argv):
-  if not argv:
-    return run_daemon()
-  cmd, rest = argv[0], argv[1:]
-  if cmd in ("-h", "--help", "help"):
-    print(USAGE)
-    return 0
-  if cmd == "status":
-    return cmd_status(rest)
-  if cmd == "shm-info":
-    return cmd_shm_info(rest)
-  _die("unknown command '%s'\n%s" % (cmd, USAGE))
+    if not argv:
+        return run_daemon()
+    cmd, rest = argv[0], argv[1:]
+    if cmd in ("-h", "--help", "help"):
+        print(USAGE)
+        return 0
+    if cmd == "status":
+        return cmd_status(rest)
+    if cmd == "shm-info":
+        return cmd_shm_info(rest)
+    _die("unknown command '%s'\n%s" % (cmd, USAGE))
 
 
 if __name__ == "__main__":
-  sys.exit(main(sys.argv[1:]))
+    sys.exit(main(sys.argv[1:]))
