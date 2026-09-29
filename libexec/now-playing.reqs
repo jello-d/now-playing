@@ -12,3 +12,10 @@ pychromecast==14.0.10
 # this. Deliberately NOT a pure-python FFT: at 4096 points every ~46 ms a
 # python loop would cost more CPU than the whole daemon does today.
 numpy>=1.24
+
+# jeepney: the MPRIS reader (libexec/npmpris_lib.py). Pure python, no compiled
+# extension. It replaces a `playerctl position` PROCESS SPAWN every POLL_SECS
+# (57,600 a day) with a method call on a held-open bus connection, and it is the
+# only way to read CanPause / CanGoNext / CanGoPrevious / CanSeek, which are
+# player-interface properties that playerctl 2.4.1's --format cannot reach.
+jeepney>=0.8

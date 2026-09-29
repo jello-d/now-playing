@@ -159,21 +159,41 @@ _art_lock  = threading.Lock()
 
 _frame     = None                    # npframe.Writer (the published contract)
 _spectrum  = None                    # npspectrum.Spectrum, or None when off
+_mpris     = None                    # npmpris_lib.Client, or None when absent
 _art_now   = ""                      # RESOLVED art path, published by
                                      # publish(), so the 30Hz frame loop
                                      # never does I/O
 _track_id  = 0                       # bumped on every track change
 _track_key = None
 
-# Local MPRIS capabilities. OPTIMISTIC and not yet measured: MPRIS exposes
-# CanPause / CanGoNext / CanGoPrevious as PLAYER-INTERFACE properties, not as
-# metadata, and playerctl 2.4.1's --format reads metadata, so these cannot be
-# read on the current playerctl path. Reading them needs a direct D-Bus query.
-# Until then a set bit means "expected to work" rather than "measured", which
-# is the weaker half of the contract's guarantee; the CLEAR-bit direction (the
-# one a renderer must not offer) is exact on the cast side, where pychromecast
-# reports real flags. Do not widen this assumption to the cast path.
-LOCAL_CAPS = npframe.CAP_PAUSE | npframe.CAP_NEXT | npframe.CAP_PREV
+# Local MPRIS capabilities, MEASURED rather than assumed. These were a CONSTANT
+# claiming pause|next|prev, because CanPause / CanGoNext / CanGoPrevious /
+# CanSeek are PLAYER-INTERFACE properties and playerctl 2.4.1's --format reads
+# only metadata. The constant was not merely unverified, it was WRONG: a
+# Chromium podcast tab reports CanGoNext False, CanGoPrevious False and CanSeek
+# True, so the card drew skip controls as usable when they did nothing, and drew
+# seek inert when it worked. docs/contract.md promises a CLEAR bit means the
+# control WILL NOT work, which is only worth something if the bits come from the
+# player itself.
+def _local_caps(instance):
+    """Caps as the player REPORTS them. A read failure degrades to pause only,
+    never to a guess: the clear-bit direction is the load-bearing half of the
+    contract, so over-claiming is the one thing this must not do. Pause is the
+    safe floor because the card does not gate it anyway (it is also the
+    whole-card click target)."""
+    if _mpris is None or not instance:
+        return npframe.CAP_PAUSE
+    c = _mpris.caps(instance)
+    if c is None:
+        return npframe.CAP_PAUSE
+    if not c["control"]:
+        return 0                    # the player refuses control outright
+    bits = 0
+    for key, bit in (("pause", npframe.CAP_PAUSE), ("next", npframe.CAP_NEXT),
+                     ("prev", npframe.CAP_PREV), ("seek", npframe.CAP_SEEK)):
+        if c[key]:
+            bits |= bit
+    return bits
 
 
 # ---- cover art ------------------------------------------------------------
@@ -307,24 +327,27 @@ def frame_loop(hz):
 
 
 # ---- local position sampling ----------------------------------------------
-def _playerctl_position():
-    try:
-        out = subprocess.run(["playerctl", "--player=" + PLAYERS, "position"],
-                             capture_output=True, text=True, timeout=1)
-        return float((out.stdout or "").strip() or 0)
-    except Exception:
-        return 0.0
-
 def sample_positions():
+    """Re-anchor the interpolation from a REAL position reading.
+
+    A failed read returns early and leaves the previous anchor alone. The old
+    playerctl path returned 0.0 on any error and this function wrote it straight
+    in, so one transient failure yanked the scrubber back to the start of the
+    track. Keeping a slightly stale anchor beats inventing zero."""
     with _lock:
         have_local = _local is not None and _local.get("title")
-    if have_local:
-        pos = _playerctl_position()
-        mono = time.monotonic()
-        with _lock:
-            if _local is not None:
-                _local["position"] = pos
-                _local["mono"] = mono      # the anchor _live_position runs from
+        instance = (_local or {}).get("instance", "")
+    if not have_local:
+        return
+    pos = _mpris.position(instance) if _mpris is not None else None
+    if pos is None:
+        return
+    mono = time.monotonic()
+    with _lock:
+        if _local is not None:
+            _local["position"] = pos
+            _local["mono"] = mono       # the anchor _live_position runs from
+
 
 def position_loop():
     while not _shutdown.wait(POLL_SECS):
@@ -386,8 +409,12 @@ def _mpris_follow():
     reason. False means playerctl is absent, which no amount of retrying
     fixes; True means it ran and then ended, which is worth retrying."""
     global _local, _proc
+    # playerInstance is the exact bus suffix playerctl CHOSE. Carrying it keeps
+    # player selection single-sourced: the D-Bus reader never picks a player, it
+    # only queries the one the follower names.
     fmt = US.join(("{{lc(status)}}", "{{artist}}", "{{title}}", "{{album}}",
-                   "{{mpris:artUrl}}", "{{mpris:length}}"))
+                   "{{mpris:artUrl}}", "{{mpris:length}}",
+                   "{{playerInstance}}"))
     cmd = ["playerctl", "--player=" + PLAYERS, "--follow", "metadata",
            "--format", fmt]
     try:
@@ -396,13 +423,17 @@ def _mpris_follow():
     except FileNotFoundError:
         return False
     for line in _proc.stdout:
-        parts = (line.rstrip("\n").split(US) + [""] * 6)[:6]
-        status, artist, title, album, art, length_us = parts
+        parts = (line.rstrip("\n").split(US) + [""] * 7)[:7]
+        status, artist, title, album, art, length_us, instance = parts
         length = 0.0
         try:
             length = float(length_us) / 1e6
         except ValueError:
             pass
+        # Read caps BEFORE taking the lock: it is a D-Bus round trip, and the
+        # publish path must never wait on the bus while holding _lock.
+        caps = (_local_caps(instance)
+                if (title and status != "stopped") else npframe.CAP_PAUSE)
         with _lock:
             if not title or status == "stopped":
                 _local = None
@@ -417,7 +448,8 @@ def _mpris_follow():
                           # same track keeps interpolating from its last sample.
                           "mono": (prev.get("mono", 0.0) if same
                                    else time.monotonic()),
-                          "caps": LOCAL_CAPS}
+                          "instance": instance,
+                          "caps": caps}
         publish()
     return True
 
@@ -796,6 +828,11 @@ def _cleanup(*_):
             _spectrum.close()
         except Exception:
             pass
+    if _mpris is not None:
+        try:
+            _mpris.close()
+        except Exception:
+            pass
     if _proc and _proc.poll() is None:
         try:
             _proc.terminate()
@@ -986,7 +1023,7 @@ def cmd_shm_info(argv):
 
 # ---- main -----------------------------------------------------------------
 def run_daemon():
-    global PLAYERS, _frame, _spectrum
+    global PLAYERS, _frame, _spectrum, _mpris
     cfg = load_config()
     PLAYERS = cfg["players"]
     signal.signal(signal.SIGINT, _on_signal)
@@ -999,6 +1036,17 @@ def run_daemon():
         os.unlink(os.path.join(RUN, "now-playing.state"))
     except OSError:
         pass
+    # The MPRIS reader makes local caps REAL and replaces a process spawn per
+    # position sample. Degrade the way the cast fallback does: say so once and
+    # carry on, since a missing bus means no local player to read anyway.
+    try:
+        import npmpris_lib
+        _mpris = npmpris_lib.Client()
+    except Exception as e:
+        sys.stderr.write("now-playing: MPRIS reader disabled (%s); local "
+                         "caps degrade to pause, position will not "
+                         "re-anchor\n" % e)
+        _mpris = None
     _frame = npframe.Writer()                    # publishes an idle frame
     if cfg["spectrum"] == "on":
         # Degrade the way the cast fallback does: say so and carry on without

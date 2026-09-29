@@ -117,6 +117,55 @@ d._local = local(title="OTHER")
 d._frame_publish()
 assert r.read()["track_id"] == first + 1, "track_id did not bump on a new track"
 
+# LOCAL CAPS ARE MEASURED, NOT ASSUMED. They were a constant claiming
+# pause|next|prev; on a real player that is wrong (a Chromium podcast tab
+# reports CanGoNext False, CanGoPrevious False, CanSeek True), so the card drew
+# skip controls as usable when they did nothing. The contract promises a CLEAR
+# bit means the control WILL NOT work, so over-claiming is the failure mode.
+class FakeMpris:
+    def __init__(self, caps=None, pos=None):
+        self._caps, self._pos = caps, pos
+    def caps(self, instance):
+        return self._caps
+    def position(self, instance):
+        return self._pos
+
+ALL = dict(pause=True, next=True, prev=True, seek=True, control=True)
+d._mpris = FakeMpris(caps=dict(ALL))
+assert d._local_caps("p") == (F.CAP_PAUSE | F.CAP_NEXT
+                             | F.CAP_PREV | F.CAP_SEEK)
+# the live-observed shape: pause and seek only
+d._mpris = FakeMpris(caps=dict(ALL, next=False, prev=False))
+got = d._local_caps("p")
+assert got == (F.CAP_PAUSE | F.CAP_SEEK), got
+assert not (got & F.CAP_NEXT) and not (got & F.CAP_PREV), \
+    "claimed skip controls the player says it does not have"
+# CanControl False means the player refuses control outright
+d._mpris = FakeMpris(caps=dict(ALL, control=False))
+assert d._local_caps("p") == 0, "claimed caps while CanControl is False"
+# an unreadable player degrades to PAUSE ONLY, never to a guess
+d._mpris = FakeMpris(caps=None)
+assert d._local_caps("p") == F.CAP_PAUSE, "a failed caps read did not degrade"
+d._mpris = None
+assert d._local_caps("p") == F.CAP_PAUSE, "no reader did not degrade"
+d._mpris = FakeMpris(caps=dict(ALL))
+assert d._local_caps("") == F.CAP_PAUSE, "guessed caps with no player instance"
+
+# A FAILED POSITION READ MUST NOT MOVE THE ANCHOR. The old playerctl path
+# returned 0.0 on any error and this wrote it straight in, so one transient
+# failure yanked the scrubber back to the start of the track.
+d._local = local(position=42.0, mono=123.0, instance="p")
+d._mpris = FakeMpris(pos=None)
+d.sample_positions()
+assert d._local["position"] == 42.0 and d._local["mono"] == 123.0, \
+    "a failed position read corrupted the interpolation anchor: %r" % d._local
+d._mpris = FakeMpris(pos=77.5)
+d.sample_positions()
+assert d._local["position"] == 77.5, "a good read did not re-anchor"
+assert d._local["mono"] > 123.0, "re-anchored position without its timestamp"
+d._mpris = None
+d._local = None
+
 # CAST WORKER SUPERVISION. A thread that dies leaves its source frozen behind a
 # FRESH heartbeat, and consumers are told to trust a fresh heartbeat -- the same
 # lie mpris_loop was fixed for in 760ae85, which did not cover the cast side.

@@ -20,6 +20,18 @@ grep -q '^import npframe_lib' "$HERE/libexec/now-playing" \
 grep -qE '0x0[0-9A-Fa-f]{3}' "$HERE/libexec/now-playing" \
   && fail "daemon hardcodes a frame offset; use npframe" || :
 [ -f "$HERE/docs/contract.md" ] || fail "docs/contract.md missing"
+# POSITION COMES OVER D-BUS, not from a process spawn per sample. The old path
+# cost 57,600 playerctl spawns a day; assert it cannot creep back, and that the
+# dep it needs is actually declared so a fresh venv gets it.
+[ -f "$HERE/libexec/npmpris_lib.py" ] || fail "libexec/npmpris_lib.py missing"
+grep -q '^jeepney' "$HERE/libexec/now-playing.reqs" \
+  || fail "reqs does not declare jeepney (the MPRIS reader needs it)"
+grep -q '_playerctl_position' "$HERE/libexec/now-playing" \
+  && fail "the per-sample playerctl position spawn is back" || :
+grep -q 'LOCAL_CAPS' "$HERE/libexec/now-playing" \
+  && fail "local caps are a CONSTANT again; read them from the player" || :
+grep -q 'playerInstance' "$HERE/libexec/now-playing" \
+  || fail "the follower stopped reporting the instance the D-Bus reader needs"
 # The JSON projection is RETIRED: the frame is the only published state. Assert
 # it stays gone, so it cannot creep back as a second source of truth that is
 # free to disagree with the frame.
