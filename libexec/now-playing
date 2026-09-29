@@ -1055,6 +1055,7 @@ def run_daemon():
         try:
             import npspectrum_lib as npspectrum
             _spectrum = npspectrum.Spectrum(cfg)
+            _spectrum.start()
         except Exception as e:
             sys.stderr.write("now-playing: spectrum disabled (%s)\n" % e)
             _spectrum = None

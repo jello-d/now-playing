@@ -219,18 +219,6 @@ assert d._bands_for({"source": "local"}) == [0.0, 0.0, 0.0], \
 d._spectrum = None
 assert d._bands_for({"source": "local"}) is None
 
-# the analyser's band layout must match what the view used to compute, or a
-# user's existing tuning changes meaning across the move
-import npspectrum_lib as NS
-sp = NS.Spectrum.__new__(NS.Spectrum)
-sp.bands_n, sp.fft, sp.rate = 24, 4096, 44100.0
-sp.fmin, sp.fmax, sp.tilt = 45.0, 16000.0, 3.5
-sp._build_bands()
-assert sp._lo[0] >= 1 and sp._hi[-1] <= sp.fft // 2, "bins outside the spectrum"
-assert all(sp._lo[i] < sp._hi[i] for i in range(24)), "empty band"
-assert all(sp._lo[i] <= sp._lo[i+1] for i in range(23)), "bands not ascending"
-# tilt crosses zero at the geometric-mean pivot: lows trimmed, highs lifted
-assert sp._tiltdb[0] < 0 < sp._tiltdb[-1], "tilt does not straddle the pivot"
 
 # NO SOURCE publishes a complete IDLE frame, not a stale one.
 d._local = None

@@ -52,7 +52,13 @@ class Spectrum:
     """One capture thread publishing smoothed band levels 0..1.
 
     read() is the only thing the daemon touches, and it never blocks on the
-    capture: the worker owns the PCM and hands over a copy under a lock."""
+    capture: the worker owns the PCM and hands over a copy under a lock.
+
+    CONSTRUCTION AND CAPTURE ARE SEPARATE on purpose. __init__ builds the DSP
+    state and start() spawns the reader, so the transform can be exercised
+    against the REAL initialisation without opening an audio device. Folding the
+    thread into __init__ would force a test to rebuild this state by hand, which
+    is a second definition of it, free to drift from the one that ships."""
 
     def __init__(self, cfg):
         self.bands_n = max(1, min(int(cfg["bands"]), 64))
@@ -69,9 +75,15 @@ class Spectrum:
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._proc = None
+        self._thread = None
         self._build_bands()
-        self._thread = threading.Thread(target=self._capture_loop, daemon=True)
-        self._thread.start()
+
+    def start(self):
+        """Begin capturing. Separate from __init__ so the DSP is testable."""
+        if self._thread is None:
+            self._thread = threading.Thread(target=self._capture_loop,
+                                            daemon=True)
+            self._thread.start()
 
     def _build_bands(self):
         """Log-spaced edges plus a per-band dB tilt, mirroring spectrum.hpp.
