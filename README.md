@@ -1,9 +1,9 @@
 # now-playing
 
-A media "now playing" state daemon. It reads the current player — local MPRIS
+A media "now playing" state daemon. It reads the current player (local MPRIS
 via [playerctl](https://github.com/altdesktop/playerctl), or a Chromecast via
 [pychromecast](https://github.com/home-assistant-libs/pychromecast) when
-casting — and publishes it as a **shared-memory frame** at
+casting) and publishes it as a **shared-memory frame** at
 `$XDG_RUNTIME_DIR/now-playing.frame`. A widget (a bar's media card, say) maps
 that page and renders title/artist/art, a progress scrubber, which transport
 controls are usable, and an audio spectrum. `np-ctl` sends transport commands
@@ -28,14 +28,14 @@ now-playing shm-info            # path, layout version, geometry, liveness
 
 ## Layout
 
-- `libexec/now-playing` — the daemon, and the `status` / `shm-info` readers
+- `libexec/now-playing`: the daemon, and the `status` / `shm-info` readers
   (Python; runs from the packaged venv).
-- `libexec/npframe_lib.py` — the frame layout, writer and reader: the single
+- `libexec/npframe_lib.py`: the frame layout, writer and reader: the single
   source of truth for the wire format.
-- `libexec/now-playing.reqs` — the venv requirements (pychromecast).
-- `bin/np-ctl` — the transport command (POSIX sh; writes the control FIFO).
-- `systemd/now-playing.service` — the `--user` unit (runs the launcher).
-- `docs/contract.md` — the consumer contract.
+- `libexec/now-playing.reqs`: the venv requirements (pychromecast).
+- `bin/np-ctl`: the transport command (POSIX sh; writes the control FIFO).
+- `systemd/now-playing.service`: the `--user` unit (runs the launcher).
+- `docs/contract.md`: the consumer contract.
 
 ## Use
 
@@ -49,7 +49,7 @@ now-playing shm-info            # path, layout version, geometry, liveness
 
 `service` builds `~/.venvs/now-playing` (pychromecast only), writes a launcher
 that execs the venv python on the daemon, and enables the `--user` service.
-`playerctl` is a **system** binary (an apt/pkg dependency), not a venv dep —
+`playerctl` is a **system** binary (an apt/pkg dependency), not a venv dep:
 local playback needs no venv at all; the venv is only for the cast fallback.
 
 ## License
