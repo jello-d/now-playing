@@ -6,7 +6,7 @@
 # with a fresh heartbeat, which is the single lie this design must not tell: a
 # consumer is instructed to trust a fresh heartbeat, so frozen data behind one
 # is worse than no data at all.
-. "$(dirname "$0")/lib.sh"
+. "$(dirname "$0")/harness_lib"
 harness_init daemon
 
 command -v python3 >/dev/null 2>&1 || skip "python3 absent"

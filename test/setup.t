@@ -1,7 +1,7 @@
 #!/bin/sh
 # setup.t - install/uninstall roundtrip against a sandbox PREFIX (no venv/daemon
 # -- `service` needs python3 + systemd, out of the fast suite).
-. "$(dirname "$0")/lib.sh"
+. "$(dirname "$0")/harness_lib"
 harness_init setup
 env HOME="$T" PREFIX="$T/local" XDG_DATA_HOME="$T/local/share" \
   sh "$HERE/setup.sh" install >/dev/null 2>&1 || fail "install exited non-zero"

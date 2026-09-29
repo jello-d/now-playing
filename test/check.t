@@ -4,7 +4,7 @@
 # when a session bus is present, yet a headless provision (no bus) must still
 # pass on enabled alone. A stub systemctl supplies is-enabled (always here) and
 # a scripted is-active; the rest of the check is satisfied by a small fixture.
-. "$(dirname "$0")/lib.sh"
+. "$(dirname "$0")/harness_lib"
 harness_init check
 
 mkdir -p "$T/local/bin" "$T/bin" "$T/venv/bin"

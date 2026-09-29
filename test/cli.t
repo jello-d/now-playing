@@ -4,7 +4,7 @@
 # frame contract is usable without building a renderer. The config assertions
 # are the fail-loud ones: an unknown key and a malformed line must ABORT, not
 # be quietly skipped, because a silently ignored tunable is found months later.
-. "$(dirname "$0")/lib.sh"
+. "$(dirname "$0")/harness_lib"
 harness_init cli
 
 command -v python3 >/dev/null 2>&1 || skip "python3 absent"
@@ -89,7 +89,8 @@ echo "$out" | grep -q "unknown key 'bogus_key'" || fail "bad message: $out"
 printf 'spectrum=off\nbands=24\ntilt=3.5\n' > "$T/cfg/now-playing/config"
 out=$(timeout 3 env XDG_RUNTIME_DIR="$T" XDG_CONFIG_HOME="$T/cfg" \
   python3 "$NP" 2>&1 || :)
-echo "$out" | grep -q "unknown key" && fail "spectrum keys still refused: $out" || :
+echo "$out" | grep -q "unknown key" \
+  && fail "spectrum keys still refused: $out" || :
 
 # ...but an out-of-range DSP value is refused LOUDLY and names the key. Clamping
 # would silently redefine what was asked for.

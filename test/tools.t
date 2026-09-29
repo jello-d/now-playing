@@ -1,6 +1,6 @@
 #!/bin/sh
 # tools.t - the packaged pieces exist and are what the daemon/launcher expect.
-. "$(dirname "$0")/lib.sh"
+. "$(dirname "$0")/harness_lib"
 harness_init tools
 [ -x "$HERE/libexec/now-playing" ] || fail "libexec/now-playing missing/not +x"
 head -1 "$HERE/libexec/now-playing" | grep -q 'python3' \

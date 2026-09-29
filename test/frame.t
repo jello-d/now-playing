@@ -5,7 +5,7 @@
 # reader spin forever), version mismatch as a loud error rather than a
 # best-effort parse, staleness, bounded string truncation on a codepoint
 # boundary, and a restart continuing the counter past an odd leftover.
-. "$(dirname "$0")/lib.sh"
+. "$(dirname "$0")/harness_lib"
 harness_init frame
 
 command -v python3 >/dev/null 2>&1 || skip "python3 absent"

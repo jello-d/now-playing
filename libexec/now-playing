@@ -268,7 +268,8 @@ def _bands_for(m):
     listener is not hearing. Measured 2026-09-18: the published position leads
     the actual acoustic output by +1.7 s (YouTube Music) to +8.0 s (Default
     Media Receiver), so a reconstructed cast spectrum could not be synced from
-    position anyway without a per-path delay nobody can measure in production."""
+    position anyway without a per-path delay nobody can measure in
+    production."""
     if _spectrum is None or m.get("source") != "local":
         return None
     bands, active = _spectrum.read()
