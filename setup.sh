@@ -14,8 +14,8 @@
 #   ./setup.sh version     the packaged version
 #
 # POSIX sh, non-privileged. The daemon publishes a SHARED-MEMORY FRAME at
-# $XDG_RUNTIME_DIR/now-playing.frame -- the contract a widget reads, specified
-# in docs/contract.md -- and takes transport on now-playing.ctl (np-ctl writes
+# $XDG_RUNTIME_DIR/now-playing.frame (the contract a widget reads, specified
+# in docs/contract.md), and takes transport on now-playing.ctl (np-ctl writes
 # it). `now-playing status` is the shell-facing reader of the same frame, so a
 # script needs no special support. playerctl is a SYSTEM binary, not a venv dep;
 # the venv carries only pychromecast (the cast fallback), like bt-sane's tray
@@ -136,7 +136,7 @@ do_check() {
       ok "now-playing.service enabled"
     else bad "now-playing.service not enabled (setup.sh service)"; fi
     # active = actually running NOW. This needs a session bus, which a headless
-    # TTY provision lacks, so only assert it when the bus answers -- otherwise
+    # TTY provision lacks, so only assert it when the bus answers, and otherwise
     # skip. Without this an ENABLED-but-crash-looping service (e.g. a launcher
     # pointing at a moved path) reads green forever; is-enabled cannot see it.
     _st=$(systemctl --user is-active now-playing.service 2>/dev/null || true)

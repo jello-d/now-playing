@@ -1,7 +1,7 @@
 #!/bin/sh
 # daemon.t - the daemon's own MODEL logic, which every other test talks around:
 # source arbitration, position interpolation, track-id bumping, cast capability
-# derivation, and -- the one that matters most -- what happens when the MPRIS
+# derivation, and (the one that matters most) what happens when the MPRIS
 # follower DIES. A dead follower used to leave the last track published forever
 # with a fresh heartbeat, which is the single lie this design must not tell: a
 # consumer is instructed to trust a fresh heartbeat, so frozen data behind one
@@ -106,7 +106,7 @@ e = d._notcast_entry(d.CAST_NATIVE, "HBO Max", 100.0)
 assert e is not None and e[0] == "HBO Max", e
 assert e[1] == 100.0 + d.NOTCAST_TTL, "native entry must carry a DEADLINE"
 
-# TRACK ID bumps on a track change and holds otherwise -- it is what a view
+# TRACK ID bumps on a track change and holds otherwise, and it is what a view
 # uses to restart a marquee, so a spurious bump is a visible glitch.
 d._frame = F.Writer()
 d._local, d._cast, d._art_now = local(), None, ""
@@ -236,7 +236,7 @@ d._mpris = None
 d._local = None
 
 # CAST WORKER SUPERVISION. A thread that dies leaves its source frozen behind a
-# FRESH heartbeat, and consumers are told to trust a fresh heartbeat -- the same
+# FRESH heartbeat, and consumers are told to trust a fresh heartbeat, the same
 # lie mpris_loop was fixed for in 760ae85, which did not cover the cast side.
 # _cast_run rebuilds discovery every REDISC_SECS and start_browser() builds a
 # zeroconf socket, so this is ~288 unguarded socket constructions a day.
@@ -280,7 +280,7 @@ assert d._bands_for({"source": "cast"}) is None, \
     "bands published for a CAST source (the audio is not local)"
 # SILENCE STILL PUBLISHES BANDS. An empty band array means "no spectrum" to a
 # consumer, and the waybar card answers that by falling back to its OWN capture
-# of this box's sink monitor -- so blanking on silence hands rendering to a
+# of this box's sink monitor, so blanking on silence hands rendering to a
 # second DSP mid-track. Decay smoothing already expresses silence as zeros.
 d._spectrum = FakeSpec([0.0, 0.0, 0.0])
 assert d._bands_for({"source": "local"}) == [0.0, 0.0, 0.0], \

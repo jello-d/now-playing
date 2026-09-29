@@ -84,7 +84,7 @@ out=$(timeout 5 env XDG_RUNTIME_DIR="$T" XDG_CONFIG_HOME="$T/cfg" \
 echo "$out" | grep -q "unknown key 'bogus_key'" || fail "bad message: $out"
 
 # The spectrum keys are LIVE now that the analyser is daemon-side, so they must
-# NOT read as unknown -- that was the deliberate refusal before the move, and a
+# NOT read as unknown: that was the deliberate refusal before the move, and a
 # stale refusal would be just as wrong as a silent accept.
 printf 'spectrum=off\nbands=24\ntilt=3.5\n' > "$T/cfg/now-playing/config"
 out=$(timeout 3 env XDG_RUNTIME_DIR="$T" XDG_CONFIG_HOME="$T/cfg" \

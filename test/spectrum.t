@@ -5,7 +5,7 @@
 # requirement was that a user's existing tuning survive the move: same
 # log-spaced edges, same tilt, same dB window, same asymmetric attack/decay.
 # That claim went unverified for eleven days. Nothing here needs an audio device
-# or a human -- _process() takes samples, so a synthetic sine proves the
+# or a human, because _process() takes samples, so a synthetic sine proves the
 # transform.
 #
 # Deliberately NOT asserted: that high frequencies read HIGHER than low ones.

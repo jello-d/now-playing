@@ -361,7 +361,8 @@ def position_loop():
 # ---- transport control ----------------------------------------------------
 def _do_command(cmd):
     # While a cast is the live source, drive its media controller (a direct
-    # playerctl cannot reach it -- local MPRIS is a stub then). Else playerctl.
+    # playerctl cannot reach it, because local MPRIS is a stub
+    # then). Else playerctl.
     with _lock:
         cast_live = _cast is not None and _cast.get("title")
         cast_status = _cast.get("status") if cast_live else None
@@ -740,8 +741,8 @@ def _cast_run():
 
     def stop_browser():
         # Tear discovery down so it can be recreated with a fresh multicast
-        # socket. Only the discovery browser is affected -- a live cast keeps
-        # its own device connection -- and we only call this while idle.
+        # socket. Only the discovery browser is affected (a live cast keeps
+        # its own device connection), and we only call this while idle.
         _drop_browser()
         # The blacklist dies WITH the browser that built it. Leaving it behind
         # is what let a stale refusal outlive every rediscovery cycle: _seen was
@@ -808,7 +809,7 @@ def _cast_run():
         # Idle with no live cast: periodically rebuild discovery. A long-lived
         # zeroconf multicast socket can stop receiving a device's TXT updates
         # (network events, group drop, days of uptime), so a device that starts
-        # casting is silently missed -- its cached st never flips to "1". A
+        # casting is silently missed: its cached st never flips to "1". A
         # fresh browser refreshes the socket. Safe here: no live cast needs it.
         if time.time() - disc_at > REDISC_SECS:
             stop_browser()
