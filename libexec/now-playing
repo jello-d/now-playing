@@ -48,6 +48,7 @@ POLL_SECS  = 1.5                     # local position re-sample / re-publish
 CAST_SECS  = 2.0                     # cast reconcile / status-refresh cadence
 REDISC_SECS = 300.0                  # idle mDNS rediscovery (anti-stale)
 NOTCAST_TTL = 60.0                   # how long a "native app" probe is trusted
+CAST_RETRY  = 2.0                    # first backoff after a cast worker death
 MEDIA_NS   = "urn:x-cast:com.google.cast.media"
 
 # ---- configuration --------------------------------------------------------
@@ -546,7 +547,77 @@ def _notcast_entry(kind, rs, now):
     return None
   return (rs, now + NOTCAST_TTL)
 
+def _drop_cast_source():
+  """Clear the cast source and publish that. Module level so the SUPERVISOR can
+  reach it: a worker that dies holding a live cast would otherwise leave that
+  track published behind a FRESH heartbeat, which is the one lie this design
+  must not tell."""
+  global _cast, _cast_conn, _cast_uuid
+  c, _cast_conn, _cast_uuid = _cast_conn, None, None
+  if c is not None:
+    try:
+      c.disconnect()
+    except Exception:
+      pass
+  with _lock:
+    was = _cast is not None
+    _cast = None
+  if was:
+    publish()
+
+
+def _drop_browser():
+  """Tear discovery down. Also module level, because a worker that died holding
+  a browser must not leak its zeroconf socket and threads into the restart."""
+  global _zc, _browser
+  b, z, _browser, _zc = _browser, _zc, None, None
+  if b is not None:
+    try:
+      from pychromecast import discovery
+      discovery.stop_discovery(b)
+    except Exception:
+      pass
+  if z is not None:
+    try:
+      z.close()
+    except Exception:
+      pass
+  with _seen_lock:
+    _seen.clear()
+
+
 def cast_main():
+  """SUPERVISE the cast worker, for exactly the reason mpris_loop supervises the
+  follower: a dead thread leaves its source frozen behind a fresh heartbeat, and
+  every consumer is instructed to trust a fresh heartbeat.
+
+  The exposure is measured, not theoretical. _cast_run rebuilds discovery every
+  REDISC_SECS, and start_browser() constructs a zeroconf socket -- roughly 288
+  unguarded constructions a day, any one of which can fail on a transient
+  network condition. Before this, one such failure killed the cast path until
+  the daemon was restarted, in total silence. The hardening pass that fixed this
+  for MPRIS in 760ae85 did not cover the cast side."""
+  delay = CAST_RETRY
+  while not _shutdown.is_set():
+    started = time.monotonic()
+    try:
+      _cast_run()
+      return                    # a clean return is the worker opting out
+    except Exception as e:
+      if _shutdown.is_set():
+        return
+      _drop_cast_source()       # publish idle, never a frozen track
+      _drop_browser()
+      sys.stderr.write(
+          "now-playing: cast worker died (%s); restarting in %.0fs\n"
+          % (e, delay))
+    if time.monotonic() - started > 60.0:
+      delay = CAST_RETRY        # it ran a healthy while; start the backoff over
+    _shutdown.wait(delay)
+    delay = min(delay * 2.0, 60.0)
+
+
+def _cast_run():
   global _zc, _browser, _cast, _cast_conn, _cast_uuid
   try:
     import zeroconf, pychromecast
@@ -581,16 +652,7 @@ def cast_main():
     # Tear discovery down so it can be recreated with a fresh multicast
     # socket. Only the discovery browser is affected -- a live cast keeps
     # its own device connection -- and we only call this while idle.
-    try:
-      discovery.stop_discovery(_browser)
-    except Exception:
-      pass
-    try:
-      _zc.close()
-    except Exception:
-      pass
-    with _seen_lock:
-      _seen.clear()
+    _drop_browser()
     # The blacklist dies WITH the browser that built it. Leaving it behind
     # is what let a stale refusal outlive every rediscovery cycle: _seen was
     # rebuilt from scratch each time while notcast silently persisted, so
@@ -631,18 +693,7 @@ def cast_main():
       return {}
 
   def drop():
-    global _cast, _cast_conn, _cast_uuid
-    c, _cast_conn, _cast_uuid = _cast_conn, None, None
-    if c is not None:
-      try:
-        c.disconnect()
-      except Exception:
-        pass
-    with _lock:
-      was = _cast is not None
-      _cast = None
-    if was:
-      publish()
+    _drop_cast_source()
 
   while not _shutdown.wait(CAST_SECS):
     with _lock:

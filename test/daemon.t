@@ -117,6 +117,39 @@ d._local = local(title="OTHER")
 d._frame_publish()
 assert r.read()["track_id"] == first + 1, "track_id did not bump on a new track"
 
+# CAST WORKER SUPERVISION. A thread that dies leaves its source frozen behind a
+# FRESH heartbeat, and consumers are told to trust a fresh heartbeat -- the same
+# lie mpris_loop was fixed for in 760ae85, which did not cover the cast side.
+# _cast_run rebuilds discovery every REDISC_SECS and start_browser() builds a
+# zeroconf socket, so this is ~288 unguarded socket constructions a day.
+import contextlib, io, threading
+d.CAST_RETRY = 0.05                 # keep the test quick; backoff still doubles
+d._frame = F.Writer()
+runs = []
+def _boom():
+    runs.append(1)
+    raise RuntimeError("synthetic cast worker death")
+d._cast_run = _boom
+d._local = None
+d._cast = local(title="STALE CAST", device="TV")   # a live-looking cast source
+d._shutdown.clear()
+err = io.StringIO()
+with contextlib.redirect_stderr(err):        # these deaths are EXPECTED
+    t = threading.Thread(target=d.cast_main, daemon=True)
+    t.start()
+    time.sleep(0.6)
+    d._shutdown.set()
+    t.join(timeout=3)
+assert len(runs) >= 2, "dead cast worker not restarted (runs=%d)" % len(runs)
+assert d._cast is None, "a dead worker left %r published as the cast source" % (
+    (d._cast or {}).get("title"))
+f = F.Reader().read()
+assert f["status"] == "idle" and f["title"] == "", \
+    "a dead cast worker left a phantom track: %r" % f["title"]
+assert "cast worker died" in err.getvalue(), \
+    "the death was not reported: %r" % err.getvalue()
+d._shutdown.clear()
+
 # SPECTRUM BANDS RIDE THE FRAME, and only for LOCAL playback. A cast decodes
 # on the device, so there is no local PCM; publishing the sink monitor against
 # a cast track would describe audio the listener is not hearing.
