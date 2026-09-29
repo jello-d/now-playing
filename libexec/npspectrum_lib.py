@@ -1,4 +1,4 @@
-"""npspectrum - the audio analyser, daemon-side.
+"""npspectrum_lib - the audio analyser, daemon-side.
 
 MOVED HERE FROM THE VIEW. This logic used to live in waybar-mods'
 overlays/spectrum.hpp: 231 lines of PulseAudio capture, FFT, banding and

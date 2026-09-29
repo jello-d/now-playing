@@ -21,7 +21,7 @@ sys.path.insert(0, here + "/libexec")
 ldr = SourceFileLoader("npd", here + "/libexec/now-playing")
 d = importlib.util.module_from_spec(importlib.util.spec_from_loader("npd", ldr))
 ldr.exec_module(d)                  # safe: main() is behind __main__
-import npframe as F
+import npframe_lib as F
 
 def local(**kw):
     base = dict(status="playing", title="T", artist="A", album="B", art="",
@@ -134,7 +134,7 @@ assert d._bands_for({"source": "local"}) is None
 
 # the analyser's band layout must match what the view used to compute, or a
 # user's existing tuning changes meaning across the move
-import npspectrum as NS
+import npspectrum_lib as NS
 sp = NS.Spectrum.__new__(NS.Spectrum)
 sp.bands_n, sp.fft, sp.rate = 24, 4096, 44100.0
 sp.fmin, sp.fmax, sp.tilt = 45.0, 16000.0, 3.5
@@ -186,7 +186,7 @@ grep -q 'follower exited' "$T/daemon.err" \
 # the dead follower last reported.
 XDG_RUNTIME_DIR=$T python3 - "$HERE" <<'EOF' || fail "phantom track survived"
 import sys; sys.path.insert(0, sys.argv[1] + "/libexec")
-import npframe as F
+import npframe_lib as F
 f = F.Reader().read()
 assert f is not None, "no frame at all"
 assert f["status"] == "idle", \

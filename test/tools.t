@@ -9,14 +9,14 @@ head -1 "$HERE/libexec/now-playing" | grep -q 'python3' \
 [ -f "$HERE/libexec/now-playing.reqs" ] || fail "now-playing.reqs missing"
 grep -q pychromecast "$HERE/libexec/now-playing.reqs" \
   || fail "reqs missing pychromecast (the cast fallback)"
-[ -f "$HERE/libexec/npframe.py" ] || fail "libexec/npframe.py missing"
+[ -f "$HERE/libexec/npframe_lib.py" ] || fail "libexec/npframe_lib.py missing"
 # npframe is the SINGLE source of truth for the layout: nothing else in the
 # package may hardcode an offset, or a change here silently stops agreeing
 # with a consumer that mirrors these constants.
-grep -q 'now-playing.frame' "$HERE/libexec/npframe.py" \
+grep -q 'now-playing.frame' "$HERE/libexec/npframe_lib.py" \
   || fail "npframe does not name the frame path (the consumer contract)"
-grep -q '^import npframe' "$HERE/libexec/now-playing" \
-  || fail "daemon does not use npframe (a second layout definition?)"
+grep -q '^import npframe_lib' "$HERE/libexec/now-playing" \
+  || fail "daemon does not use npframe_lib (a second layout definition?)"
 grep -qE '0x0[0-9A-Fa-f]{3}' "$HERE/libexec/now-playing" \
   && fail "daemon hardcodes a frame offset; use npframe" || :
 [ -f "$HERE/docs/contract.md" ] || fail "docs/contract.md missing"

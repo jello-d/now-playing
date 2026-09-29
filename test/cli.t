@@ -22,7 +22,7 @@ run shm-info >/dev/null 2>&1 && fail "shm-info passed with no frame" || :
 XDG_RUNTIME_DIR=$T python3 - "$HERE" <<'EOF' || fail "could not write a frame"
 import sys
 sys.path.insert(0, sys.argv[1] + "/libexec")
-import npframe as F
+import npframe_lib as F
 F.Writer().publish(status=F.STATUS_PLAYING, source=F.SOURCE_LOCAL,
                    position=30.0, length=240.0, caps=F.CAP_PAUSE | F.CAP_NEXT,
                    track_id=4, title="Song", artist="Band", album="Record")
@@ -63,7 +63,7 @@ n=$(run status --follow --interval 0.05 2>/dev/null | head -3 | wc -l)
 XDG_RUNTIME_DIR=$T python3 - "$HERE" <<'EOF' || fail "could not age the frame"
 import struct, sys, time
 sys.path.insert(0, sys.argv[1] + "/libexec")
-import npframe as F
+import npframe_lib as F
 w = F.Writer(); w.publish(status=F.STATUS_PLAYING, title="Song")
 struct.pack_into("<Q", w._mm, F.O_HEARTBEAT,
                  time.monotonic_ns() - int(10e9))     # 10s old

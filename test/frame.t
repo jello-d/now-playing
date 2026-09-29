@@ -1,8 +1,8 @@
 #!/bin/sh
-# frame.t - the shared-memory frame contract (libexec/npframe.py). Covers the
-# roundtrip and, more importantly, the FAILURE modes docs/contract.md commits
-# to: a bounded seqlock retry (so a daemon killed mid-write cannot make a
-# reader spin forever), version mismatch as a loud error rather than a
+# frame.t - the shared-memory frame contract (libexec/npframe_lib.py). Covers
+# the roundtrip and, more importantly, the FAILURE modes docs/contract.md
+# commits to: a bounded seqlock retry (so a daemon killed mid-write cannot
+# make a reader spin forever), version mismatch as a loud error rather than a
 # best-effort parse, staleness, bounded string truncation on a codepoint
 # boundary, and a restart continuing the counter past an odd leftover.
 . "$(dirname "$0")/harness_lib"
@@ -13,7 +13,7 @@ command -v python3 >/dev/null 2>&1 || skip "python3 absent"
 XDG_RUNTIME_DIR=$T python3 - "$HERE" <<'EOF' || fail "frame assertions failed"
 import struct, sys, time
 sys.path.insert(0, sys.argv[1] + "/libexec")
-import npframe as F
+import npframe_lib as F
 
 w = F.Writer()
 

@@ -1,5 +1,5 @@
 """
-npframe - the now-playing shared-memory frame: layout, writer, reader.
+npframe_lib - the now-playing shared-memory frame: layout, writer, reader.
 
 THE SINGLE SOURCE OF TRUTH for the wire format described in docs/contract.md.
 Every offset a consumer needs is defined here once; nothing else in this

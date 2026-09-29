@@ -17,8 +17,8 @@ its own native app (app_id 'AndroidNativeApp', e.g. a Google TV on HBO Max) is
 inspected read-only and dropped, never driven. Devices are only probed when
 their mDNS says an app is running (st=1) AND local is idle.
 
-PUBLISHES the shared-memory FRAME (libexec/npframe.py, docs/contract.md): one
-page at $XDG_RUNTIME_DIR/now-playing.frame carrying everything a renderer
+PUBLISHES the shared-memory FRAME (libexec/npframe_lib.py, docs/contract.md):
+one page at $XDG_RUNTIME_DIR/now-playing.frame carrying everything a renderer
 needs, complete every time, coherent by seqlock. THE DAEMON INTERPOLATES
 position between real samples; a consumer never does, and never consults a
 second source of truth.
@@ -39,7 +39,7 @@ import json, os, sys, signal, threading, subprocess, time, re, logging
 import hashlib, shutil, urllib.request, urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import npframe                                   # noqa: E402  (sibling module)
+import npframe_lib as npframe          # noqa: E402  (sibling module)
 
 US         = "\x1f"
 RUN        = os.environ.get("XDG_RUNTIME_DIR", "/tmp")
@@ -950,7 +950,7 @@ def run_daemon():
     # it. numpy lives in the venv, so an interpreter without it loses the
     # spectrum, not the daemon.
     try:
-      import npspectrum
+      import npspectrum_lib as npspectrum
       _spectrum = npspectrum.Spectrum(cfg)
     except Exception as e:
       sys.stderr.write("now-playing: spectrum disabled (%s)\n" % e)
