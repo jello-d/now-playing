@@ -36,6 +36,7 @@ Verbs (the daemon is the default, which is what the --user unit runs):
 Deps: pychromecast (venv), playerctl (system binary), python3 stdlib.
 """
 import json, os, sys, signal, threading, subprocess, time, re, logging
+import select
 import hashlib, shutil, urllib.request, urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -49,6 +50,8 @@ CAST_SECS  = 2.0                     # cast reconcile / status-refresh cadence
 REDISC_SECS = 300.0                  # idle mDNS rediscovery (anti-stale)
 NOTCAST_TTL = 60.0                   # how long a "native app" probe is trusted
 CAST_RETRY  = 2.0                    # first backoff after a cast worker death
+CTL_POLL    = 2.0                    # control-FIFO re-validation interval
+CTL_MAX     = 4096                   # drop a line longer than any command
 MEDIA_NS   = "urn:x-cast:com.google.cast.media"
 
 # ---- configuration --------------------------------------------------------
@@ -384,23 +387,74 @@ def _do_command(cmd):
         except FileNotFoundError:
             pass
 
-def ctl_loop():
+def _ctl_open():
+    """Ensure the control FIFO exists and return a read fd, or None.
+
+    O_RDWR is deliberate (and Linux-specific, which this daemon already is):
+    holding the WRITE end ourselves means there is always a writer, so the
+    reader never sees EOF and never spins on an empty pipe. O_NONBLOCK makes
+    the open itself return immediately, which is the whole point: a plain
+    blocking open is what made the old loop unrecoverable."""
     try:
         if not os.path.exists(CTL_FILE):
-            os.mkfifo(CTL_FILE)
+            os.mkfifo(CTL_FILE, 0o600)
+        return os.open(CTL_FILE, os.O_RDWR | os.O_NONBLOCK)
     except OSError as e:
-        sys.stderr.write("now-playing: ctl fifo init failed (%s)\n" % e)
-        return
+        sys.stderr.write("now-playing: ctl fifo open failed (%s)\n" % e)
+        return None
+
+
+def _ctl_gone(fd):
+    """True when the path no longer names the FIFO we hold open. Compared by
+    INODE, so a delete-and-recreate by something else is DETECTED rather than
+    assumed benign: we would otherwise hold a fd nobody can write to."""
+    try:
+        return os.stat(CTL_FILE).st_ino != os.fstat(fd).st_ino
+    except OSError:
+        return True
+
+
+def ctl_loop():
+    """Read transport commands off the control FIFO, RE-VALIDATING it.
+
+    The old loop called mkfifo ONCE and then blocked in a plain open(). Delete
+    the FIFO and that open never returns -- the pending open pins the orphaned
+    inode -- so the loop never iterated again and nothing ever recreated the
+    path. Transport then died PERMANENTLY and in silence, because np-ctl's
+    `[ -p ]` guard turns every command into a no-op when the path is missing.
+    Measured 2026-09-16: it does NOT busy-spin (CPU went down), which is
+    exactly why it went unnoticed."""
+    fd = None
+    buf = b""
     while not _shutdown.is_set():
+        if fd is None:
+            fd = _ctl_open()
+            if fd is None:
+                _shutdown.wait(CTL_POLL)
+                continue
         try:
-            with open(CTL_FILE) as f:
-                for line in f:
-                    cmd = line.strip()
-                    if cmd:
-                        _do_command(cmd)
-        except Exception:
-            if _shutdown.is_set():
-                break
+            ready, _w, _x = select.select([fd], [], [], CTL_POLL)
+        except OSError:
+            ready = []
+        if _shutdown.is_set():
+            break
+        if ready:
+            try:
+                buf += os.read(fd, CTL_MAX)
+            except OSError:
+                pass
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                cmd = line.decode("utf-8", "replace").strip()
+                if cmd:
+                    _do_command(cmd)
+            if len(buf) > CTL_MAX:
+                buf = b""        # a writer sending no newline cannot grow us
+        if _ctl_gone(fd):
+            os.close(fd)
+            fd = None                # recreated on the next pass
+    if fd is not None:
+        os.close(fd)
 
 
 # ---- local MPRIS source ---------------------------------------------------

@@ -12,8 +12,9 @@ harness_init daemon
 command -v python3 >/dev/null 2>&1 || skip "python3 absent"
 
 # --- unit: the model functions, imported directly -------------------------
-XDG_RUNTIME_DIR=$T python3 - "$HERE" <<'EOF' || fail "model assertions failed"
-import importlib.util, sys, time
+XDG_RUNTIME_DIR=$T python3 - "$HERE" "$T" <<'EOF' \
+  || fail "model assertions failed"
+import importlib.util, os, stat, sys, time
 from importlib.machinery import SourceFileLoader
 here = sys.argv[1]
 sys.path.insert(0, here + "/libexec")
@@ -116,6 +117,74 @@ assert r.read()["track_id"] == first, "track_id bumped without a track change"
 d._local = local(title="OTHER")
 d._frame_publish()
 assert r.read()["track_id"] == first + 1, "track_id did not bump on a new track"
+
+# THE CONTROL FIFO MUST SURVIVE BEING DELETED. The old ctl_loop called mkfifo
+# ONCE and then blocked in a plain open(), so removing the FIFO left that open
+# pinned on the orphaned inode forever: the loop never iterated, nothing
+# recreated the path, and np-ctl's `[ -p ]` guard silently turned every
+# transport command into a no-op. It does not busy-spin, hence unnoticed.
+import threading
+d.CTL_FILE = sys.argv[2] + "/np.ctl"
+d.CTL_POLL = 0.05                   # keep the re-validation quick for the test
+seen = []
+d._do_command = lambda cmd: seen.append(cmd)
+d._shutdown.clear()
+ct = threading.Thread(target=d.ctl_loop, daemon=True)
+ct.start()
+for _ in range(100):                # wait for the fifo to appear
+    if os.path.exists(d.CTL_FILE):
+        break
+    time.sleep(0.02)
+assert stat.S_ISFIFO(os.stat(d.CTL_FILE).st_mode), "ctl path is not a fifo"
+
+
+def send(cmd):
+    """Write one command, waiting for a READER to attach. O_WRONLY|O_NONBLOCK
+    fails ENXIO while nobody holds the read end, so retrying here also asserts
+    that the daemon really does reopen a replaced fifo."""
+    for _ in range(200):
+        try:
+            fd = os.open(d.CTL_FILE, os.O_WRONLY | os.O_NONBLOCK)
+        except OSError:
+            time.sleep(0.02)
+            continue
+        os.write(fd, (cmd + "\n").encode())
+        os.close(fd)
+        return
+    raise AssertionError("no reader ever attached to %s" % d.CTL_FILE)
+
+
+def wait_for(cmd, why):
+    for _ in range(150):
+        if cmd in seen:
+            return
+        time.sleep(0.02)
+    raise AssertionError("%s (saw %r)" % (why, seen))
+
+
+send("playpause")
+wait_for("playpause", "a command on a fresh fifo was never dispatched")
+
+# THE DECISIVE PART: delete it out from under the reader.
+os.unlink(d.CTL_FILE)
+for _ in range(150):
+    if os.path.exists(d.CTL_FILE):
+        break
+    time.sleep(0.02)
+assert os.path.exists(d.CTL_FILE), "the fifo was NOT recreated after deletion"
+assert stat.S_ISFIFO(os.stat(d.CTL_FILE).st_mode), "recreated as a non-fifo"
+send("next")
+wait_for("next", "transport stayed dead after the fifo was recreated")
+
+# a REPLACED fifo (different inode) is detected too, not just a removed one
+os.unlink(d.CTL_FILE)
+os.mkfifo(d.CTL_FILE, 0o600)        # someone else's fifo at our path
+send("previous")
+wait_for("previous", "a fifo replaced by another inode was not picked up")
+
+d._shutdown.set()
+ct.join(timeout=3)
+d._shutdown.clear()
 
 # LOCAL CAPS ARE MEASURED, NOT ASSUMED. They were a constant claiming
 # pause|next|prev; on a real player that is wrong (a Chromium podcast tab
