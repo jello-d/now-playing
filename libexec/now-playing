@@ -64,14 +64,13 @@ MEDIA_NS   = "urn:x-cast:com.google.cast.media"
 CONFIG_KEYS = {"players": str, "publish_hz": float,
                "spectrum": str, "bands": int, "fft": int, "rate": float,
                "fmin": float, "fmax": float, "gain": float, "floor_db": float,
-               "tilt": float, "attack": float, "decay": float,
-               "active_rms": float}
+               "tilt": float, "attack": float, "decay": float}
 CONFIG_DEFAULTS = {"players": "YoutubeMusic,chrome,chromium",
                    "publish_hz": 30.0,
                    "spectrum": "off", "bands": 24, "fft": 4096, "rate": 44100.0,
                    "fmin": 45.0, "fmax": 16000.0, "gain": 2.0,
                    "floor_db": -60.0, "tilt": 3.5, "attack": 0.65,
-                   "decay": 0.16, "active_rms": 4e-4}
+                   "decay": 0.16}
 PLAYERS = CONFIG_DEFAULTS["players"]     # set from config before threads start
 
 
@@ -273,8 +272,7 @@ def _bands_for(m):
   production."""
   if _spectrum is None or m.get("source") != "local":
     return None
-  bands, active = _spectrum.read()
-  return bands if active else None
+  return _spectrum.read()
 
 
 def _frame_publish():

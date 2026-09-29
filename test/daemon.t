@@ -154,14 +154,19 @@ d._shutdown.clear()
 # on the device, so there is no local PCM; publishing the sink monitor against
 # a cast track would describe audio the listener is not hearing.
 class FakeSpec:
-    def __init__(self, bands, active=True): self.b, self.a = bands, active
-    def read(self): return list(self.b), self.a
+    def __init__(self, bands): self.b = bands
+    def read(self): return list(self.b)
 d._spectrum = FakeSpec([0.1, 0.5, 0.9])
 assert d._bands_for({"source": "local"}) == [0.1, 0.5, 0.9]
 assert d._bands_for({"source": "cast"}) is None, \
     "bands published for a CAST source (the audio is not local)"
-d._spectrum = FakeSpec([0.1, 0.5, 0.9], active=False)
-assert d._bands_for({"source": "local"}) is None, "silence published as bands"
+# SILENCE STILL PUBLISHES BANDS. An empty band array means "no spectrum" to a
+# consumer, and the waybar card answers that by falling back to its OWN capture
+# of this box's sink monitor -- so blanking on silence hands rendering to a
+# second DSP mid-track. Decay smoothing already expresses silence as zeros.
+d._spectrum = FakeSpec([0.0, 0.0, 0.0])
+assert d._bands_for({"source": "local"}) == [0.0, 0.0, 0.0], \
+    "silence blanked the band array instead of publishing zeros"
 d._spectrum = None
 assert d._bands_for({"source": "local"}) is None
 

@@ -227,7 +227,6 @@ An out-of-range value is refused at startup with the reason, not clamped.
     tilt           3.5                           dB/octave lift toward highs
     attack         0.65                          rise smoothing per hop
     decay          0.16                          fall smoothing per hop
-    active_rms     4e-4                          RMS above this = audio live
 
 `spectrum = on` publishes `bands` for LOCAL playback only. While a cast is the
 source the daemon publishes `band_count = 0`, because a Chromecast decodes on

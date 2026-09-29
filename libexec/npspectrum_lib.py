@@ -62,12 +62,10 @@ class Spectrum:
     self.gain, self.floor_db = float(cfg["gain"]), float(cfg["floor_db"])
     self.tilt = float(cfg["tilt"])
     self.attack, self.decay = float(cfg["attack"]), float(cfg["decay"])
-    self.active_rms = float(cfg["active_rms"])
 
     self._win = np.hanning(self.fft)
     self._acc = np.zeros(0, dtype=np.float32)
     self._bands = np.zeros(self.bands_n, dtype=np.float32)
-    self._active = False
     self._lock = threading.Lock()
     self._stop = threading.Event()
     self._proc = None
@@ -98,10 +96,17 @@ class Spectrum:
       self._tiltdb[b] = self.tilt * np.log2(((f0 * f1) ** 0.5) / pivot)
 
   def read(self):
-    """(bands, active). A COPY, so the caller can publish it without
-    holding the capture lock across a frame write."""
+    """The current band levels, as a COPY so the caller can publish without
+    holding the capture lock across a frame write.
+
+    There is deliberately NO "is audio live" flag. spectrum.hpp computed one
+    (active_rms) and the card DISCARDED it, so it never had a consumer; adding
+    one here would have made silence blank the bands, and a blanked band array
+    reads as "no spectrum" to a consumer, which hands rendering back to its own
+    fallback DSP mid-track. Silence is already expressed correctly by the decay
+    smoothing walking the levels to zero."""
     with self._lock:
-      return self._bands.tolist(), self._active
+      return self._bands.tolist()
 
   def close(self):
     self._stop.set()
@@ -119,7 +124,6 @@ class Spectrum:
     span = 0.0 - self.floor_db
     while self._acc.size >= n:
       frame = self._acc[:n]
-      rms = float(np.sqrt(np.mean(frame.astype(np.float64) ** 2)))
       spec = np.abs(np.fft.rfft(frame * self._win)) / (n / 2.0)
       with self._lock:
         for b in range(self.bands_n):
@@ -131,7 +135,6 @@ class Spectrum:
           cur = float(self._bands[b])
           c = self.attack if v > cur else self.decay
           self._bands[b] = cur + (v - cur) * c
-        self._active = rms > self.active_rms
       self._acc = self._acc[n // 2:]
 
   def _capture_loop(self):
@@ -166,4 +169,3 @@ class Spectrum:
         pass
       with self._lock:
         self._bands[:] = 0.0
-        self._active = False
