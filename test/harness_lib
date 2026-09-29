@@ -4,6 +4,8 @@
 # test/run. Named for what it PROVIDES (harness_init et al), with the _lib
 # classifier marking it sourced-never-executed; test/ holds both kinds, so the
 # marker earns its keep and test/run's *.t glob cannot pick it up as a test.
+# HERE and T are consumed by the sourcing test, not by this file.
+# shellcheck disable=SC2034
 harness_init() {
   TEST_NAME=$1
   HERE=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)

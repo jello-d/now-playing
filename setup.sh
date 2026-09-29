@@ -109,11 +109,13 @@ do_check() {
     ok "np-ctl linked"
   else bad "np-ctl not linked ($_bin/np-ctl)"; fi
   for _d in $DEPS; do
-    command -v "$_d" >/dev/null 2>&1 && ok "dep $_d present" \
-      || warn "dep $_d absent (transport/MPRIS needs it)"; done
+    if command -v "$_d" >/dev/null 2>&1; then ok "dep $_d present"
+    else warn "dep $_d absent (transport/MPRIS needs it)"; fi
+  done
   for _d in $DEPS_SOFT; do
-    command -v "$_d" >/dev/null 2>&1 && ok "dep $_d present" \
-      || warn "dep $_d absent (a feature degrades)"; done
+    if command -v "$_d" >/dev/null 2>&1; then ok "dep $_d present"
+    else warn "dep $_d absent (a feature degrades)"; fi
+  done
   if [ -e "$_bin/now-playing" ]; then
     # The launcher is GENERATED, not a symlink, so readlink cannot audit it:
     # compare it byte-for-byte with what `service` would write right now. A
@@ -127,12 +129,12 @@ do_check() {
     else
       bad "launcher STALE or foreign, not $_root (setup.sh service)"
     fi
-    [ -x "$VENV/bin/python" ] && ok "daemon venv present" \
-      || bad "launcher present but venv missing (setup.sh service)"
+    if [ -x "$VENV/bin/python" ]; then ok "daemon venv present"
+    else bad "launcher present but venv missing (setup.sh service)"; fi
     # enabled = will start next login (headless-safe: reads the unit file).
-    systemctl --user is-enabled --quiet now-playing.service 2>/dev/null \
-      && ok "now-playing.service enabled" \
-      || bad "now-playing.service not enabled (setup.sh service)"
+    if systemctl --user is-enabled --quiet now-playing.service 2>/dev/null; then
+      ok "now-playing.service enabled"
+    else bad "now-playing.service not enabled (setup.sh service)"; fi
     # active = actually running NOW. This needs a session bus, which a headless
     # TTY provision lacks, so only assert it when the bus answers -- otherwise
     # skip. Without this an ENABLED-but-crash-looping service (e.g. a launcher

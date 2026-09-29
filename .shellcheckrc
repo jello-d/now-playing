@@ -1,0 +1,23 @@
+# now-playing shellcheck config. POSIX-dash mode: `shellcheck -s dash <file>`,
+# which test/lint.t runs over every shell file in the repo.
+#
+# Only findings that are WRONG HERE FOR A STRUCTURAL REASON are disabled
+# repo-wide. Anything that is merely inconvenient gets FIXED instead: the four
+# `A && B || C` notes (SC2015) in setup.sh were restructured into if/else rather
+# than silenced, because the warning is correct in general and suppressing it
+# would leave the trap armed for the next edit. Genuinely one-off cases carry an
+# inline `# shellcheck disable=` with a reason beside the code (np-ctl's
+# deliberate single quotes, harness_lib's externally-consumed HERE).
+#
+# SC1091: every test sources the harness by a COMPUTED path, `. "$(dirname
+# "$0")/harness_lib"`, which shellcheck cannot resolve statically. Nothing is
+# lost by not following it: test/lint.t lints harness_lib DIRECTLY, so the file
+# is checked, just not through the seven call sites. Following it instead
+# (external-sources + source-path=SCRIPTDIR) was tried and is a lateral move --
+# it trades seven harmless SC1091 notes for seven harmless SC2119 notes about
+# bare `pass` inheriting the script's positional parameters.
+#
+# SC1007: the `CDPATH= cd` idiom, used by every self-locating script here to
+# neutralise CDPATH for exactly one command. shellcheck reads the empty
+# assignment as a suspected typo; it is the correct portable spelling.
+disable=SC1091,SC1007

@@ -11,4 +11,8 @@
 # command instead.
 f="${XDG_RUNTIME_DIR:-/tmp}/now-playing.ctl"
 [ -p "$f" ] || exit 0
+# The single quotes are DELIBERATE: $1/$2 must reach the INNER sh unexpanded, so
+# they are its positional parameters rather than this shell's. A directive binds
+# to the next command, so it has to sit here and not above the guard.
+# shellcheck disable=SC2016
 timeout 0.5 sh -c 'printf "%s\n" "$1" > "$2"' _ "$1" "$f" 2>/dev/null || true
