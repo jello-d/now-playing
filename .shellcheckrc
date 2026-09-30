@@ -13,7 +13,7 @@
 # "$0")/harness_lib"`, which shellcheck cannot resolve statically. Nothing is
 # lost by not following it: test/lint.t lints harness_lib DIRECTLY, so the file
 # is checked, just not through the seven call sites. Following it instead
-# (external-sources + source-path=SCRIPTDIR) was tried and is a lateral move --
+# (external-sources + source-path=SCRIPTDIR) was tried and is a lateral move:
 # it trades seven harmless SC1091 notes for seven harmless SC2119 notes about
 # bare `pass` inheriting the script's positional parameters.
 #

@@ -11,7 +11,7 @@ TWO PROBLEMS, ONE CLIENT.
    properties, not metadata, and playerctl 2.4.1's --format reaches only
    metadata (confirmed: it answers {{canGoNext}} with an empty string). So local
    caps were a CONSTANT claiming pause|next|prev, and on a real player that
-   constant is WRONG -- a Chromium podcast tab reports CanGoNext False,
+   constant is WRONG: a Chromium podcast tab reports CanGoNext False,
    CanGoPrevious False, CanSeek True. The card drew skip controls as usable when
    they did nothing, which docs/contract.md promises will not happen.
 
@@ -106,7 +106,7 @@ class Client:
 
         One GetAll rather than four Gets: a single round trip, and it is called
         on a metadata change rather than on the position poll. A property the
-        player omits reads as False, which is the safe direction -- the contract
+        player omits reads as False, which is the safe direction: the contract
         says a CLEAR bit means the control will not work, so guessing True is
         the one thing this must never do."""
         try:

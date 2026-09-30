@@ -146,7 +146,7 @@ do_check() {
       *)      bad "now-playing.service '$_st', not active (crash-loop?)" ;;
     esac
     # A LIVE frame is a STRONGER claim than an active unit: it proves the
-    # daemon is actually PUBLISHING, not merely running. Same session gate --
+    # daemon is actually PUBLISHING, not merely running. Same session gate:
     # no frame at all means the daemon has never run in this session (a
     # headless provision), which is unknowable rather than wrong. The reader
     # is stdlib-only, so the system python3 runs it without the venv.
