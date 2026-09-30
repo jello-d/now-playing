@@ -16,8 +16,8 @@ now-playing \- media "now playing" state daemon (MPRIS + Chromecast fallback)
 .B now-playing
 is a systemd
 .B --user
-daemon that reads the current media state \(em the local MPRIS player via
-playerctl, or a Chromecast via pychromecast when casting \(em and publishes it
+daemon that reads the current media state (the local MPRIS player via
+playerctl, or a Chromecast via pychromecast when casting) and publishes it
 as a shared-memory frame at
 .IR $XDG_RUNTIME_DIR/now-playing.frame .
 A widget (for example a bar's media card) maps that page to render title,
