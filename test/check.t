@@ -7,12 +7,20 @@
 . "$(dirname "$0")/harness_lib"
 harness_init check
 
-mkdir -p "$T/local/bin" "$T/bin" "$T/venv/bin"
-ln -sfn "$HERE/bin/np-ctl" "$T/local/bin/np-ctl"   # np-ctl linked
-: > "$T/venv/bin/python"; chmod +x "$T/venv/bin/python"   # venv present
-# A launcher matching what `service` would write for THIS tree + venv.
+# A PAYLOAD-SHAPED fixture: the install is a copy into one tree now, with the
+# bin link and the launcher both pointing INSIDE it, so a fixture built the old
+# way (links into the source tree) fails check's containment assertions before
+# it ever reaches the service-state logic this file exists to test.
+PAY=$T/local/share/now-playing
+mkdir -p "$T/local/bin" "$T/bin" "$PAY/bin" "$PAY/libexec" "$PAY/venv/bin"
+: > "$PAY/bin/np-ctl"
+: > "$PAY/libexec/now-playing"
+: > "$PAY/libexec/npframe_lib.py"
+: > "$PAY/venv/bin/python"; chmod +x "$PAY/venv/bin/python"
+ln -sfn "$PAY/bin/np-ctl" "$T/local/bin/np-ctl"
+# A launcher matching what `service` would write for this payload.
 printf '#!/bin/sh\nexec "%s" "%s" "$@"\n' \
-  "$T/venv/bin/python" "$HERE/libexec/now-playing" > "$T/local/bin/now-playing"
+  "$PAY/venv/bin/python" "$PAY/libexec/now-playing" > "$T/local/bin/now-playing"
 
 # stub systemctl: enabled always; is-active echoes $FAKE_ACTIVE (empty = the
 # bus does not answer, i.e. a headless provision -> print nothing, non-zero).
@@ -31,9 +39,15 @@ exit 0
 EOF
 chmod +x "$T/bin/systemctl"
 
+# XDG_RUNTIME_DIR points at the scratch dir so the frame-liveness step finds
+# NOTHING and stays silent. Without that this test reads the REAL runtime frame,
+# so whether it passes depends on whether the box's daemon happens to be
+# publishing, and a stale frame on a stopped daemon fails it for no reason.
+# The venv is NOT overridden: it lives inside the payload by default now, and
+# the default is the thing worth testing.
 ck() {   # $1 = FAKE_ACTIVE ("" for no bus)
   env -i PATH="$T/bin:/usr/bin:/bin" HOME="$T" PREFIX="$T/local" \
-    XDG_DATA_HOME="$T/local/share" NOW_PLAYING_VENV="$T/venv" \
+    XDG_DATA_HOME="$T/local/share" XDG_RUNTIME_DIR="$T" \
     ${1:+FAKE_ACTIVE="$1"} sh "$HERE/setup.sh" check
 }
 
@@ -63,5 +77,17 @@ printf '#!/bin/sh\nexec /nowhere/python /nowhere/daemon "$@"\n' \
 ck active >/dev/null 2>&1 && fail "check passed with a FOREIGN launcher" || :
 out=$(ck active 2>&1 || :)
 echo "$out" | grep -q 'launcher STALE or foreign' || fail "bad report: $out"
+
+# A LINK BACK INTO A SOURCE TREE must FAIL, which is the regression this layout
+# exists to prevent: that is what the old install did, and for a departed
+# package the target is a clone that is re-cloned every sweep, so the link
+# dangles and only a transport click ever reveals it.
+printf '#!/bin/sh\nexec "%s" "%s" "$@"\n' \
+  "$PAY/venv/bin/python" "$PAY/libexec/now-playing" > "$T/local/bin/now-playing"
+ln -sfn "$HERE/bin/np-ctl" "$T/local/bin/np-ctl"
+ck active >/dev/null 2>&1 \
+  && fail "check passed with np-ctl outside the payload" || :
+out=$(ck active 2>&1 || :)
+echo "$out" | grep -q 'resolve outside' || fail "no containment report: $out"
 
 pass
