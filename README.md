@@ -30,9 +30,9 @@ now-playing shm-info            # path, layout version, geometry, liveness
 
 - `libexec/now-playing`: the daemon, and the `status` / `shm-info` readers
   (Python; runs from the packaged venv).
-- `libexec/npframe_lib.py`: the frame layout, writer and reader: the single
+- `lib/npframe_lib.py`: the frame layout, writer and reader: the single
   source of truth for the wire format.
-- `libexec/now-playing.reqs`: the venv requirements (pychromecast).
+- `share/now-playing.reqs`: the venv requirements (pychromecast).
 - `bin/np-ctl`: the transport command (POSIX sh; writes the control FIFO).
 - `systemd/now-playing.service`: the `--user` unit (runs the launcher).
 - `docs/contract.md`: the consumer contract.

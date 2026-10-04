@@ -1,5 +1,5 @@
 #!/bin/sh
-# frame.t - the shared-memory frame contract (libexec/npframe_lib.py). Covers
+# frame.t - the shared-memory frame contract (lib/npframe_lib.py). Covers
 # the roundtrip and, more importantly, the FAILURE modes docs/contract.md
 # commits to: a bounded seqlock retry (so a daemon killed mid-write cannot
 # make a reader spin forever), version mismatch as a loud error rather than a
@@ -12,7 +12,7 @@ command -v python3 >/dev/null 2>&1 || skip "python3 absent"
 
 XDG_RUNTIME_DIR=$T python3 - "$HERE" <<'EOF' || fail "frame assertions failed"
 import struct, sys, time
-sys.path.insert(0, sys.argv[1] + "/libexec")
+sys.path.insert(0, sys.argv[1] + "/lib")
 import npframe_lib as F
 
 w = F.Writer()

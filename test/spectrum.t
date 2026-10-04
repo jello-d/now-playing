@@ -1,5 +1,5 @@
 #!/bin/sh
-# spectrum.t - the DAEMON-SIDE DSP (libexec/npspectrum_lib.py).
+# spectrum.t - the DAEMON-SIDE DSP (lib/npspectrum_lib.py).
 #
 # The analyser was a PORT of waybar-mods overlays/spectrum.hpp, and the whole
 # requirement was that a user's existing tuning survive the move: same
@@ -22,7 +22,7 @@ python3 -c 'import numpy' 2>/dev/null || skip "numpy absent"
 
 python3 - "$HERE" <<'EOF' || fail "DSP assertions failed"
 import sys
-sys.path.insert(0, sys.argv[1] + "/libexec")
+sys.path.insert(0, sys.argv[1] + "/lib")
 import numpy as np
 import npspectrum_lib as NS
 

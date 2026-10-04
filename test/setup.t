@@ -24,8 +24,8 @@ sup install >/dev/null 2>&1 || fail "install exited non-zero"
 # depends on a source tree, which is the whole thing this layout replaced.
 [ -L "$PAY" ] && fail "payload is a SYMLINK, not a copied tree" || :
 [ -d "$PAY" ] || fail "no payload directory at $PAY"
-for _f in bin/np-ctl libexec/now-playing libexec/npframe_lib.py \
-          libexec/now-playing.reqs man/man1/now-playing.1; do
+for _f in bin/np-ctl libexec/now-playing lib/npframe_lib.py \
+          share/now-playing.reqs man/man1/now-playing.1; do
   [ -f "$PAY/$_f" ] || fail "payload is missing $_f"
 done
 

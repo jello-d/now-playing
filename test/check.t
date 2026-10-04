@@ -12,10 +12,11 @@ harness_init check
 # way (links into the source tree) fails check's containment assertions before
 # it ever reaches the service-state logic this file exists to test.
 PAY=$T/local/share/now-playing
-mkdir -p "$T/local/bin" "$T/bin" "$PAY/bin" "$PAY/libexec" "$PAY/venv/bin"
+mkdir -p "$T/local/bin" "$T/bin" "$PAY/bin" "$PAY/libexec" "$PAY/lib" \
+         "$PAY/venv/bin"
 : > "$PAY/bin/np-ctl"
 : > "$PAY/libexec/now-playing"
-: > "$PAY/libexec/npframe_lib.py"
+: > "$PAY/lib/npframe_lib.py"
 : > "$PAY/venv/bin/python"; chmod +x "$PAY/venv/bin/python"
 ln -sfn "$PAY/bin/np-ctl" "$T/local/bin/np-ctl"
 # A launcher matching what `service` would write for this payload.

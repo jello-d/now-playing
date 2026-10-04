@@ -21,7 +21,7 @@ run shm-info >/dev/null 2>&1 && fail "shm-info passed with no frame" || :
 # Lay down a live frame, then assert the verbs read it.
 XDG_RUNTIME_DIR=$T python3 - "$HERE" <<'EOF' || fail "could not write a frame"
 import sys
-sys.path.insert(0, sys.argv[1] + "/libexec")
+sys.path.insert(0, sys.argv[1] + "/lib")
 import npframe_lib as F
 F.Writer().publish(status=F.STATUS_PLAYING, source=F.SOURCE_LOCAL,
                    position=30.0, length=240.0, caps=F.CAP_PAUSE | F.CAP_NEXT,
@@ -62,7 +62,7 @@ n=$(run status --follow --interval 0.05 2>/dev/null | head -3 | wc -l)
 # A STALE frame is not a live one: the daemon is gone, so report and exit 1.
 XDG_RUNTIME_DIR=$T python3 - "$HERE" <<'EOF' || fail "could not age the frame"
 import struct, sys, time
-sys.path.insert(0, sys.argv[1] + "/libexec")
+sys.path.insert(0, sys.argv[1] + "/lib")
 import npframe_lib as F
 w = F.Writer(); w.publish(status=F.STATUS_PLAYING, title="Song")
 struct.pack_into("<Q", w._mm, F.O_HEARTBEAT,

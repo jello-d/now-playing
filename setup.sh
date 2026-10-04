@@ -98,13 +98,13 @@ _payload_stage() {
   esac
   rm -rf -- "$_ps_new" "$_ps_old"
   mkdir -p "$_ps_new" || { echo "$PKG: cannot create $_ps_new" >&2; return 1; }
-  for _d in bin libexec man; do
+  for _d in bin lib libexec share man; do
     [ -d "$_root/$_d" ] || continue
     cp -R "$_root/$_d" "$_ps_new/" || {
       echo "$PKG: cannot copy $_d" >&2; rm -rf -- "$_ps_new"; return 1; }
   done
   # DROP BUILD DETRITUS. The repo gitignores __pycache__, so a clean clone has
-  # none, but the venv python RUNS from the clone's libexec and writes it there,
+  # none, but the venv python RUNS from the clone's lib and writes it there,
   # so a copy would ship it. A payload is what the repo ships, not what running
   # it produced; stale bytecode for a module that has since been renamed is the
   # kind of thing that only ever confuses a later diagnosis.
@@ -112,7 +112,7 @@ _payload_stage() {
     -exec rm -rf -- {} + 2>/dev/null || :
   # Fail LOUD on a payload that would install but not work, rather than linking
   # into an empty tree and discovering it at the next daemon restart.
-  for _f in bin/np-ctl libexec/now-playing libexec/npframe_lib.py; do
+  for _f in bin/np-ctl libexec/now-playing lib/npframe_lib.py; do
     [ -f "$_ps_new/$_f" ] || {
       echo "$PKG: staged payload has no $_f" >&2
       rm -rf -- "$_ps_new"; return 1; }
@@ -172,7 +172,7 @@ do_service() {
     return 1; }
   [ -d "$VENV" ] || python3 -m venv "$VENV"
   "$VENV/bin/pip" install -q --upgrade pip
-  "$VENV/bin/pip" install -q -r "$_pay/libexec/now-playing.reqs"
+  "$VENV/bin/pip" install -q -r "$_pay/share/now-playing.reqs"
   mkdir -p "$_bin"
   _launcher_body > "$_bin/now-playing"
   chmod +x "$_bin/now-playing"

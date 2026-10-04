@@ -17,7 +17,7 @@ XDG_RUNTIME_DIR=$T python3 - "$HERE" "$T" <<'EOF' \
 import importlib.util, os, stat, sys, time
 from importlib.machinery import SourceFileLoader
 here = sys.argv[1]
-sys.path.insert(0, here + "/libexec")
+sys.path.insert(0, here + "/lib")
 # The daemon has no .py extension, so it needs an explicit source loader.
 ldr = SourceFileLoader("npd", here + "/libexec/now-playing")
 d = importlib.util.module_from_spec(importlib.util.spec_from_loader("npd", ldr))
@@ -329,7 +329,7 @@ grep -q 'follower exited' "$T/daemon.err" \
 # The decisive assertion: the LAST published frame must be idle, not the track
 # the dead follower last reported.
 XDG_RUNTIME_DIR=$T python3 - "$HERE" <<'EOF' || fail "phantom track survived"
-import sys; sys.path.insert(0, sys.argv[1] + "/libexec")
+import sys; sys.path.insert(0, sys.argv[1] + "/lib")
 import npframe_lib as F
 f = F.Reader().read()
 assert f is not None, "no frame at all"

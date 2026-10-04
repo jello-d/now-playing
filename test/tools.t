@@ -6,14 +6,14 @@ harness_init tools
 head -1 "$HERE/libexec/now-playing" | grep -q 'python3' \
   || fail "daemon shebang is not python3 (venv-run leftover?)"
 [ -x "$HERE/bin/np-ctl" ] || fail "bin/np-ctl missing/not +x"
-[ -f "$HERE/libexec/now-playing.reqs" ] || fail "now-playing.reqs missing"
-grep -q pychromecast "$HERE/libexec/now-playing.reqs" \
+[ -f "$HERE/share/now-playing.reqs" ] || fail "now-playing.reqs missing"
+grep -q pychromecast "$HERE/share/now-playing.reqs" \
   || fail "reqs missing pychromecast (the cast fallback)"
-[ -f "$HERE/libexec/npframe_lib.py" ] || fail "libexec/npframe_lib.py missing"
+[ -f "$HERE/lib/npframe_lib.py" ] || fail "lib/npframe_lib.py missing"
 # npframe is the SINGLE source of truth for the layout: nothing else in the
 # package may hardcode an offset, or a change here silently stops agreeing
 # with a consumer that mirrors these constants.
-grep -q 'now-playing.frame' "$HERE/libexec/npframe_lib.py" \
+grep -q 'now-playing.frame' "$HERE/lib/npframe_lib.py" \
   || fail "npframe does not name the frame path (the consumer contract)"
 grep -q '^import npframe_lib' "$HERE/libexec/now-playing" \
   || fail "daemon does not use npframe_lib (a second layout definition?)"
@@ -23,8 +23,8 @@ grep -qE '0x0[0-9A-Fa-f]{3}' "$HERE/libexec/now-playing" \
 # POSITION COMES OVER D-BUS, not from a process spawn per sample. The old path
 # cost 57,600 playerctl spawns a day; assert it cannot creep back, and that the
 # dep it needs is actually declared so a fresh venv gets it.
-[ -f "$HERE/libexec/npmpris_lib.py" ] || fail "libexec/npmpris_lib.py missing"
-grep -q '^jeepney' "$HERE/libexec/now-playing.reqs" \
+[ -f "$HERE/lib/npmpris_lib.py" ] || fail "lib/npmpris_lib.py missing"
+grep -q '^jeepney' "$HERE/share/now-playing.reqs" \
   || fail "reqs does not declare jeepney (the MPRIS reader needs it)"
 grep -q '_playerctl_position' "$HERE/libexec/now-playing" \
   && fail "the per-sample playerctl position spawn is back" || :
