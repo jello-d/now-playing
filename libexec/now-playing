@@ -4,14 +4,14 @@ now-playing - "now playing" state for the waybar media/card: local MPRIS with a
 Chromecast FALLBACK. Runs as a systemd --user service.
 
 PRIORITY: local MPRIS (playerctl --follow) wins whenever it has a track. The
-cast fallback is consulted ONLY when local is idle -- while playing locally we
+cast fallback is consulted ONLY when local is idle; while playing locally we
 make ZERO cast connections. Casting empties Chrome's local MPRIS to a stub, so
 the fallback reads the metadata off the cast device instead.
 
 SAFETY (why cast is safe again): we never blindly drive a device. On a candidate
 we read the PASSIVE receiver status first (broadcast, read-only) and engage the
-MEDIA controller -- the part that can launch the Default Media Receiver and
-HIJACK a TV -- only once `app_id` proves a real Cast media receiver is ALREADY
+MEDIA controller (the part that can launch the Default Media Receiver and
+HIJACK a TV) only once `app_id` proves a real Cast media receiver is ALREADY
 running (a valid 8-hex Cast Application ID + the media namespace). A device on
 its own native app (app_id 'AndroidNativeApp', e.g. a Google TV on HBO Max) is
 inspected read-only and dropped, never driven. Devices are only probed when
@@ -289,7 +289,7 @@ def _bands_for(m):
     answer is NO BANDS (band_count 0, which the contract already defines as "no
     spectrum available"). The sink monitor would still be carrying whatever
     this box happens to be playing, and publishing that against a cast track
-    would be a confident lie -- the analyser would be describing audio the
+    would be a confident lie: the analyser would be describing audio the
     listener is not hearing. Measured 2026-09-18: the published position leads
     the actual acoustic output by +1.7 s (YouTube Music) to +8.0 s (Default
     Media Receiver), so a reconstructed cast spectrum could not be synced from
@@ -420,8 +420,8 @@ def ctl_loop():
     """Read transport commands off the control FIFO, RE-VALIDATING it.
 
     The old loop called mkfifo ONCE and then blocked in a plain open(). Delete
-    the FIFO and that open never returns -- the pending open pins the orphaned
-    inode -- so the loop never iterated again and nothing ever recreated the
+    the FIFO and that open never returns (the pending open pins the orphaned
+    inode) so the loop never iterated again and nothing ever recreated the
     path. Transport then died PERMANENTLY and in silence, because np-ctl's
     `[ -p ]` guard turns every command into a no-op when the path is missing.
     Measured 2026-09-16: it does NOT busy-spin (CPU went down), which is
@@ -598,10 +598,10 @@ def _classify_cast(cast_status):
     casting device the gate would have accepted was reported idle for days, and
     a restart picked it up in 4 seconds.
 
-      media   -- a real Cast media receiver is running; safe to drive.
-      native  -- a genuine native app (app_id 'AndroidNativeApp' fails the hex
+      media:   a real Cast media receiver is running; safe to drive.
+      native:  a genuine native app (app_id 'AndroidNativeApp' fails the hex
                  test). NEVER drive this; it is someone's TV.
-      pending -- nothing running, or a receiver still coming up. Inconclusive,
+      pending: nothing running, or a receiver still coming up. Inconclusive,
                  so the caller must RETRY rather than remember it.
 
     Read from the passive receiver broadcast; no media controller touched."""
@@ -627,7 +627,7 @@ def _notcast_entry(kind, rs, now):
 
     Both halves are the fix: only a CONFIRMED native app is remembered at all,
     and even that expires. The defect was a caller that remembered every
-    non-media answer, forever -- so a probe that merely arrived early, before a
+    non-media answer, forever, so a probe that merely arrived early, before a
     launching receiver had published its namespaces, blacklisted a device that
     was about to start casting and never reconsidered."""
     if kind != CAST_NATIVE:
@@ -681,7 +681,7 @@ def cast_main():
     heartbeat.
 
     The exposure is measured, not theoretical. _cast_run rebuilds discovery
-    every REDISC_SECS, and start_browser() constructs a zeroconf socket --
+    every REDISC_SECS, and start_browser() constructs a zeroconf socket:
     roughly 288 unguarded constructions a day, any one of which can fail on
     a transient network condition. Before this, one such failure killed the
     cast path until the daemon was restarted, in total silence. The
@@ -772,7 +772,7 @@ def _cast_run():
             pass
 
     def mdns_txt(service):
-        """Device's mDNS TXT (decoded, cache-only -- no network I/O). st='1' =>
+        """Device's mDNS TXT (decoded, cache-only, no network I/O). st='1' =>
         an app is running; rs => the running app's name (changes per cast)."""
         try:
             info = zeroconf.ServiceInfo("_googlecast._tcp.local.", service)
