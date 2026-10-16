@@ -40,16 +40,36 @@ exit 0
 EOF
 chmod +x "$T/bin/systemctl"
 
+# stub python3, for the SPECTRUM coherence assertion only. It intercepts
+# `status --json` when FAKE_SPECTRUM is set and otherwise EXECS THE REAL
+# INTERPRETER, so the shm-info frame-liveness path keeps running for real and
+# no existing case here changes behaviour. Driving it this way is what lets
+# the drift branch be tested with no daemon and no audio device.
+REAL_PY=$(command -v python3 || echo /usr/bin/python3)
+cat > "$T/bin/python3" <<EOF
+#!/bin/sh
+case " \$* " in
+  *" status "*)
+    if [ -n "\${FAKE_SPECTRUM:-}" ]; then
+      printf '{"spectrum_enabled": %s}\n' "\$FAKE_SPECTRUM"
+      exit 0
+    fi ;;
+esac
+exec $REAL_PY "\$@"
+EOF
+chmod +x "$T/bin/python3"
+
 # XDG_RUNTIME_DIR points at the scratch dir so the frame-liveness step finds
 # NOTHING and stays silent. Without that this test reads the REAL runtime frame,
 # so whether it passes depends on whether the box's daemon happens to be
 # publishing, and a stale frame on a stopped daemon fails it for no reason.
 # The venv is NOT overridden: it lives inside the payload by default now, and
 # the default is the thing worth testing.
-ck() {   # $1 = FAKE_ACTIVE ("" for no bus)
+ck() {   # $1 = FAKE_ACTIVE ("" for no bus); $2 = FAKE_SPECTRUM (unset = none)
   env -i PATH="$T/bin:/usr/bin:/bin" HOME="$T" PREFIX="$T/local" \
     XDG_DATA_HOME="$T/local/share" XDG_RUNTIME_DIR="$T" \
-    ${1:+FAKE_ACTIVE="$1"} sh "$HERE/setup.sh" check
+    ${1:+FAKE_ACTIVE="$1"} ${2:+FAKE_SPECTRUM="$2"} \
+    sh "$HERE/setup.sh" check
 }
 
 # active -> check passes and says so
@@ -90,5 +110,57 @@ ck active >/dev/null 2>&1 \
   && fail "check passed with np-ctl outside the payload" || :
 out=$(ck active 2>&1 || :)
 echo "$out" | grep -q 'resolve outside' || fail "no containment report: $out"
+
+# --- SPECTRUM coherence -----------------------------------------------------
+# The analyser sat OFF on both boxes for a fortnight and nothing could see it,
+# because a disabled spectrum and a broken one are the same bytes from outside.
+# These cases exist so "off" is a REPORTED state and a config that disagrees
+# with the running daemon is a FAILURE rather than silence.
+#
+# Restore the fixture the containment case above deliberately broke, or every
+# assertion below fails for the wrong reason.
+ln -sfn "$PAY/bin/np-ctl" "$T/local/bin/np-ctl"
+CFG=$T/.config/now-playing
+mkdir -p "$CFG"
+
+# No config at all and no live frame: the package default, reported, not fatal.
+out=$(ck active) || fail "check failed with no spectrum config"
+echo "$out" | grep -q 'spectrum off' || fail "did not report the default: $out"
+
+# Config and daemon AGREE, both ways round. Neither may fail.
+printf 'spectrum = on\n' > "$CFG/config"
+out=$(ck active true) || fail "check failed when config and daemon agree (on)"
+echo "$out" | grep -q 'spectrum on (config and running daemon agree)' \
+  || fail "no agreement report (on): $out"
+rm -f "$CFG/config"
+out=$(ck active false) || fail "check failed when config and daemon agree (off)"
+echo "$out" | grep -q 'spectrum off (config and running daemon agree)' \
+  || fail "no agreement report (off): $out"
+
+# DRIFT, both directions, each a FAILURE. This is the branch that had no
+# detector at all: a config edited without a restart leaves the file saying one
+# thing and the daemon doing another, and nothing else on the box can see it.
+printf 'spectrum = off\n' > "$CFG/config"
+ck active true >/dev/null 2>&1 && fail "check passed on drift (off vs on)" || :
+out=$(ck active true 2>&1 || :)
+echo "$out" | grep -q 'spectrum DRIFT' || fail "no drift report: $out"
+
+printf 'spectrum = on\n' > "$CFG/config"
+ck active false >/dev/null 2>&1 && fail "check passed on drift (on vs off)" || :
+
+# The PARSER must survive real config files: comments, ragged spacing, and a
+# trailing comment on the live line. A parse that silently yields "" reads as
+# the default and would report a false DRIFT on a correct box.
+printf '# a comment\n  spectrum  =  on   # trailing\n' > "$CFG/config"
+out=$(ck active true) || fail "parser mishandled comments/spacing: $out"
+echo "$out" | grep -q 'spectrum on (config and running daemon agree)' \
+  || fail "no agreement after a ragged config: $out"
+
+# A comment-ONLY config declares nothing, so the default stands.
+printf '# nothing declared here\n' > "$CFG/config"
+out=$(ck active false) || fail "comment-only config did not fall back to off"
+echo "$out" | grep -q 'spectrum off' \
+  || fail "no default after a comment-only config: $out"
+rm -f "$CFG/config"
 
 pass

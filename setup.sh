@@ -297,6 +297,41 @@ do_check() {
         *'"present": true'*) bad "frame STALE; daemon up but not publishing" ;;
         *)                   : ;;
       esac
+      # SPECTRUM: report the state, and assert the RUNNING daemon agrees with
+      # the config. Being OFF is never a failure here: off is the package
+      # default and the right default for a PUBLIC tool, because the analyser
+      # opens a capture of the default sink's monitor and that should be opt
+      # in. What this refuses is DRIFT, a config file saying one thing while
+      # the live daemon does another, which is exactly what a config edited
+      # without a restart leaves behind.
+      # REPORTING it is the other half, and it is the half that was missing:
+      # the analyser sat off on two boxes for a fortnight because a disabled
+      # spectrum and a broken one look identical from outside, so nothing
+      # short of a human noticing a flat meter could tell them apart.
+      _dec=off
+      if [ -f "$_cfg/$PKG/config" ]; then
+        _v=$(sed 's/#.*//' "$_cfg/$PKG/config" | awk -F= '
+               $1 ~ /^[[:space:]]*spectrum[[:space:]]*$/ {
+                 gsub(/[[:space:]]/, "", $2); print $2 }' | tail -1)
+        if [ -n "$_v" ]; then _dec=$_v; fi
+      fi
+      # ASSERT spectrum_enabled, NOT the band count. A cast publishes ZERO
+      # bands by design (the contract's "no spectrum available"), so a
+      # band-count assertion would fail every time the user casts.
+      _sj=$(python3 "$_root/libexec/now-playing" status --json \
+            2>/dev/null || true)
+      case "$_sj" in
+        *'"spectrum_enabled": true'*)  _liv=on ;;
+        *'"spectrum_enabled": false'*) _liv=off ;;
+        *)                             _liv= ;;
+      esac
+      if [ -z "$_liv" ]; then
+        ok "spectrum $_dec (declared; no live frame to confirm against)"
+      elif [ "$_liv" = "$_dec" ]; then
+        ok "spectrum $_dec (config and running daemon agree)"
+      else
+        bad "spectrum DRIFT: config says $_dec, daemon is $_liv (restart it)"
+      fi
     fi
   else
     warn "daemon not installed (run setup.sh service for it)"
